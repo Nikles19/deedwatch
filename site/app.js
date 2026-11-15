@@ -35,9 +35,8 @@ function houseIcon(market, recentWeek) {
 function initMap() {
   map = L.map("map", {zoomControl: false}).setView(UH, 14);
   L.control.zoom({position: "bottomright"}).addTo(map);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-    maxZoom: 20, subdomains: "abcd",
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'}).addTo(map);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
   saleLayer = L.layerGroup().addTo(map);
 }
 function inArea(c) { return S.area === "ALL" || c === S.area; }
@@ -62,9 +61,9 @@ function renderMap(fit) {
 /* ---------------- this week ---------------- */
 function renderWeek() {
   const since = daysAgo(WEEK_DAYS);
-  const rows = S.changes.filter(c => c.d >= since && inArea(c.c));
-  $("#weekSub").textContent = rows.length ? `${rows.length} change${rows.length === 1 ? "" : "s"} since ${fmtDate(since)}` : "";
-  if (!rows.length) { $("#week").innerHTML = `<li class="none" style="cursor:default">No recorded sales or owner changes in the last 7 days${S.area === "ALL" ? "" : " in " + cityShort(S.area)}.</li>`; return; }
+  const rows = S.changes.filter(c => c.d >= since && inArea(c.c) && (S.nonmarket || c.kind === "sale"));
+  $("#weekSub").textContent = rows.length ? `${rows.length} ${S.nonmarket ? "transfer" : "sale"}${rows.length === 1 ? "" : "s"} since ${fmtDate(since)}` : "";
+  if (!rows.length) { $("#week").innerHTML = `<li class="none" style="cursor:default">No recorded ${S.nonmarket ? "transfers" : "sales"} in the last 7 days${S.area === "ALL" ? "" : " in " + cityShort(S.area)}.</li>`; return; }
   $("#week").innerHTML = rows.slice(0, 60).map((c, i) => {
     const [y, m, d] = c.d.split("-").map(Number); const dt = new Date(y, m - 1, d);
     const tag = c.kind === "sale" ? '<span class="tag">Sold</span>' : c.kind === "owner" ? '<span class="tag o">New owner</span>' : `<span class="tag g">${esc(shortDeed(c.t) || "Transfer")}</span>`;
@@ -244,10 +243,11 @@ function renderFoot() {
   const built = m.built ? new Date(m.built).toLocaleString("en-US", {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"}) : "—";
   const pct = m.parcels ? Math.round(100 * (m.withHistory || 0) / m.parcels) : 0;
   $("#foot").innerHTML = `Updated ${esc(built)} from Cuyahoga County Fiscal Office records (<a href="https://myplace.cuyahogacounty.gov/" target="_blank" rel="noopener">MyPlace</a>). ${(m.parcels || 0).toLocaleString()} parcels tracked${pct < 100 ? `; sale history loaded for ${pct}% so far` : ""}. Not an official record.`;
-  if (pct < 95 && m.parcels) {
-    const b = document.createElement("div"); b.className = "banner";
-    b.textContent = `Still loading sale history: ${pct}% of parcels done. The map fills in as the nightly job works through the area.`;
-    $(".mapcol").appendChild(b);
+  if (pct < 100 && m.parcels) {
+    const b = document.createElement("span"); b.className = "pill loading";
+    b.title = "Sale history is still being loaded for the rest of the area; the map fills in as it finishes.";
+    b.textContent = `History ${pct}% loaded`;
+    $(".maptools").appendChild(b);
   }
 }
 async function boot() {
@@ -263,7 +263,7 @@ async function boot() {
   document.addEventListener("click", e => { if (!e.target.closest(".search")) $("#results").hidden = true; });
   document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
   $("#dClose").onclick = closeDrawer;
-  $("#nonmarket").onchange = e => { S.nonmarket = e.target.checked; renderMap(false); };
+  $("#nonmarket").onchange = e => { S.nonmarket = e.target.checked; renderMap(false); renderWeek(); };
   $("#hidePublic").onchange = e => { S.hidePublic = e.target.checked; renderOwners(); };
   $("#priceKind").querySelectorAll("button").forEach(b => b.onclick = () => { S.kind = b.dataset.k; $("#priceKind").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); renderPrices(); });
   try {

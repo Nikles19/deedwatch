@@ -14,6 +14,7 @@ on:
     paths: ["site/**", "scraper/**"]
 
 permissions:
+  actions: write
   contents: write
   pages: write
   id-token: write
@@ -28,6 +29,8 @@ jobs:
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -69,6 +72,15 @@ jobs:
           if git diff --cached --quiet; then echo "No data changes"; exit 0; fi
           git commit -m "Data update $(TZ=America/New_York date +'%Y-%m-%d %H:%M')"
           for i in 1 2 3; do git pull --rebase -X ours origin main && git push && break; sleep 5; done
+
+      - name: Keep backfilling until every parcel has history
+        if: steps.mode.outputs.mode != 'build'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rem=$(python -c "import json;print(json.load(open('data/state.json')).get('history',{}).get('remaining',0))")
+          echo "Parcels still without history: $rem"
+          if [ "$rem" -gt 0 ]; then gh workflow run update.yml --ref main -f mode=backfill; fi
 
       - name: Build site
         run: python -m scraper build --out _site

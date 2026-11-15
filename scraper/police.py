@@ -192,7 +192,7 @@ class Geocoder:
     """Place a report at a parcel: exact house number on the street, else the nearest number on that street."""
 
     def __init__(self, parcels: dict[str, dict]):
-        self.exact, self.by_street = {}, {}
+        self.exact, self.by_street, self.any_city = {}, {}, {}
         for p in parcels.values():
             if not p.get("lat"):
                 continue
@@ -203,25 +203,68 @@ class Geocoder:
             key = (p.get("c", ""), st)
             self.exact.setdefault((key, num), (p["lat"], p["lng"]))
             self.by_street.setdefault(key, []).append((num, p["lat"], p["lng"]))
+            self.any_city.setdefault(st, []).append((num, p["lat"], p["lng"]))
 
-    def locate(self, city: str, loc: str):
-        parts = [x.strip() for x in loc.replace("/", ",").split(",") if x.strip()]
+    @staticmethod
+    def _m(a, b):
+        """Rough distance in meters between two (lat, lng) points."""
+        return ((a[0] - b[0]) * 111_000) ** 2 + ((a[1] - b[1]) * 83_000) ** 2
+
+    def _intersection(self, k1, k2):
+        a, b = self.by_street.get(k1), self.by_street.get(k2)
+        if not a or not b:
+            return None
+        d, p, q = min((self._m(p[1:], q[1:]), p, q) for p in a for q in b)
+        if d > 130 ** 2:
+            return None
+        return (p[1] + q[1]) / 2, (p[2] + q[2]) / 2
+
+    def _street_front(self, key, num, here):
+        """The middle of the street in front of a house: halfway to the nearest house across the street."""
+        # the other side may be in the next city (Green, Cedar, Warrensville), so look across all cities
+        across = [t for t in self.any_city.get(key[1], []) if t[0] % 2 != num % 2 and abs(t[0] - num) <= 150]
+        if not across:
+            return here
+        q = min(across, key=lambda t: self._m(here, t[1:]))
+        if self._m(here, q[1:]) > 110 ** 2:
+            return here
+        return (here[0] + q[1]) / 2, (here[1] + q[2]) / 2
+
+    def locate(self, city: str, loc: str, street: bool = False):
+        """street=True puts the point on the street (traffic): in front of the address, or at the intersection."""
+        parts = [x.strip() for x in loc.replace("/", ",").replace("&", ",").split(",") if x.strip()]
         num = next((int(x) for x in parts if x.isdigit()), None)
         streets = [x for x in parts if not x.isdigit()]
         if not streets:
             return None
         key = (city, street_key(streets[0]))
-        if num is not None and (key, num) in self.exact:
-            return self.exact[(key, num)]
+        if num is None and len(streets) > 1:
+            hit = self._intersection(key, (city, street_key(streets[1])))
+            if hit:
+                return hit
         pts = self.by_street.get(key)
-        if not pts:
+        if num is not None and (key, num) in self.exact:
+            here = self.exact[(key, num)]
+        elif not pts:
             return None
-        if num is None:
+        elif num is None:
             pts = sorted(pts)
             mid = pts[len(pts) // 2]
             return mid[1], mid[2]
-        best = min(pts, key=lambda t: abs(t[0] - num))
-        return (best[1], best[2]) if abs(best[0] - num) <= 200 else None
+        else:
+            same = [t for t in pts if t[0] % 2 == num % 2] or pts
+            best = min(same, key=lambda t: abs(t[0] - num))
+            if abs(best[0] - num) > 200:
+                return None
+            here = (best[1], best[2])
+        return self._street_front(key, num, here) if street else here
+
+
+TRAFFIC = re.compile(r"OVI|TRAFFIC|ACCIDENT|CRASH|DRIV|LICENSE|HIT-SKIP|PARKING")
+
+
+def is_traffic(r: dict) -> bool:
+    return r.get("t", "").upper().startswith("A") or bool(TRAFFIC.search(" ".join(r.get("off") or []).upper()))
 
 
 def run(minutes: float = 30, days: int = 10, backfill_days: int = KEEP_DAYS, interval: float = 0.6):

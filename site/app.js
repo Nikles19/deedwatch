@@ -50,6 +50,7 @@ function initMap() {
   S.bases = bases;
   setBase(bases[store.get("base")] ? store.get("base") : "Streets");
   map.createPane("parcels", map.getPane("rotatePane") || undefined); map.getPane("parcels").style.zIndex = 390;
+  map.createPane("police", map.getPane("rotatePane") || undefined); map.getPane("police").style.zIndex = 420;
   parcelLayer = L.featureGroup([], {pane: "parcels"}).addTo(map);
   labelLayer = L.layerGroup().addTo(map);
   saleLayer = L.layerGroup().addTo(map);
@@ -412,7 +413,9 @@ function renderAreas() {
   $("#areas").querySelectorAll("button").forEach(b => b.onclick = () => { S.area = b.dataset.a; store.set("area", S.area); renderAreas(); renderAll(true); });
 }
 /* ---------------- police reports ---------------- */
-let policeLayer;
+let policeLayer, policeRend;
+const POL_CATS = [["Violent", "#c53030"], ["Property", "#c47f00"], ["Traffic", "#2b6cb0"], ["Other", "#718096"]];
+S.polHide = new Set(store.get("polHide", []));
 function policeCat(off, t) {
   const o = String(off || "").toUpperCase();
   if (t === "A" || /OVI|TRAFFIC|ACCIDENT|CRASH|DRIV|LICENSE|HIT-SKIP|PARKING/.test(o)) return ["Traffic", "#2b6cb0"];
@@ -421,7 +424,8 @@ function policeCat(off, t) {
   return ["Other", "#718096"];
 }
 async function renderPolice() {
-  if (!policeLayer) policeLayer = L.layerGroup().addTo(map);
+  // SVG in its own pane: the empty parts of the layer let clicks through to the parcels underneath
+  if (!policeLayer) { policeRend = L.svg({pane: "police", padding: .3}); policeLayer = L.layerGroup().addTo(map); }
   policeLayer.clearLayers();
   const on = $("#policeOn").checked;
   $("#policeOpts").hidden = !on; menuState();
@@ -432,17 +436,25 @@ async function renderPolice() {
     try { S.police = await getJSON("data/police.json"); } catch { S.police = {reports: []}; }
   }
   const since = daysAgo(days), base = S.police.base || "";
-  const rows = (S.police.reports || []).filter(r => r[1] >= since && inArea(r[0]));
-  const rend = L.canvas({padding: .3});
+  const all = (S.police.reports || []).filter(r => r[1] >= since && inArea(r[0]));
+  const counts = {};
+  for (const r of all) { const c = policeCat(r[3], r[2])[0]; counts[c] = (counts[c] || 0) + 1; }
+  $("#polCats").innerHTML = POL_CATS.map(([c, col]) => `<button data-c="${c}" class="${S.polHide.has(c) ? "off" : ""}" aria-pressed="${!S.polHide.has(c)}"><i style="background:${col}"></i>${c} <span>${counts[c] || 0}</span></button>`).join("");
+  $("#polCats").querySelectorAll("button").forEach(b => b.onclick = () => {
+    const c = b.dataset.c; S.polHide.has(c) ? S.polHide.delete(c) : S.polHide.add(c);
+    store.set("polHide", [...S.polHide]); renderPolice();
+  });
+  const rows = all.filter(r => !S.polHide.has(policeCat(r[3], r[2])[0]));
+  const rend = policeRend;
   for (const r of rows) {
     const [cat, col] = policeCat(r[3], r[2]);
     const what = r[3] ? title(r[3]) : (r[2] === "A" ? "Traffic crash" : "Incident (details not read yet)");
-    const m = L.circleMarker([r[5], r[6]], {renderer: rend, radius: 5.5, color: "#fff", weight: 1.2, fillColor: col, fillOpacity: .9});
+    const m = L.circleMarker([r[5], r[6]], {renderer: rend, pane: "police", radius: 5.5, color: "#fff", weight: 1.2, fillColor: col, fillOpacity: .9});
     m.bindTooltip(`<b>${esc(what)}</b><br>${fmtDate(r[1])} · ${esc(title(r[4].replace(/^(\d+),(.*)$/, "$1 $2").replace(/^([^,\d][^,]*),(\d+)$/, "$2 $1")))}`, {direction: "top"});
     m.bindPopup(`<div class="ppop"><b>${esc(what)}</b><br>${cat} · ${fmtDate(r[1])}<br>${esc(title(r[4]))} · ${esc(cityShort(r[0]))}<br>Report ${esc(r[8])}${r[7] ? `<br><a href="${esc(base + r[7])}" target="_blank" rel="noopener">Open the police report (PDF)</a>` : ""}</div>`);
     policeLayer.addLayer(m);
   }
-  $("#policeLbl").textContent = `${rows.length} report${rows.length === 1 ? "" : "s"} in the last ${days === 365 ? "12 months" : days + " days"}${S.area === "ALL" ? "" : " in " + cityShort(S.area)}`;
+  $("#policeLbl").textContent = `${rows.length}${rows.length < all.length ? " of " + all.length : ""} report${all.length === 1 ? "" : "s"} in the last ${days === 365 ? "12 months" : days + " days"}${S.area === "ALL" ? "" : " in " + cityShort(S.area)}`;
 }
 
 function renderAll(fit) {

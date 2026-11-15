@@ -45,11 +45,15 @@
       <p class="fine">Market sales only: $0, quit-claim, sheriff and multi-parcel transfers are excluded.</p>
     </section>
 
-    <section class="card">
-      <div class="card-h"><h2>Top owners</h2>
-        <label class="mini"><input type="checkbox" id="hidePublic" checked> Hide public owners</label>
+    <section class="card" id="ownersCard">
+      <button class="card-h collapse" id="ownersToggle" aria-expanded="false" aria-controls="ownersBody"><h2>Top owners</h2><span class="sub" id="ownersSub"></span><span class="chev" aria-hidden="true"></span></button>
+      <div id="ownersBody" hidden>
+        <div class="owner-tools">
+          <div class="seg" id="ownerMode"><button data-k="name" class="on">By name</button><button data-k="mail">By mailing address</button></div>
+          <label class="mini"><input type="checkbox" id="hidePublic" checked> Hide public owners</label>
+        </div>
+        <div id="owners" class="owners"></div>
       </div>
-      <div id="owners" class="owners"></div>
     </section>
 
     <footer class="foot" id="foot"></footer>

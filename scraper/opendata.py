@@ -12,7 +12,8 @@ import requests
 URL = "https://gis.cuyahogacounty.gov/server/rest/services/Open_Data_Parcels/MapServer/1/query"
 FIELDS = ["parcelpin", "par_addr", "par_street", "par_suffix", "par_unit", "par_city", "par_zip", "property_class",
           "tax_luc_description", "gross_certified_total", "total_res_liv_area", "total_acreage", "deeded_owner",
-          "res_bldg_count", "com_living_units"]
+          "res_bldg_count", "com_living_units", "mail_name", "mail_addr_street", "mail_unit", "mail_city", "mail_state",
+          "mail_zip"]
 
 
 def _get(params, retries=4):
@@ -71,6 +72,10 @@ def fetch_city(city: str) -> list[dict]:
                 "ac": a.get("total_acreage") or 0,
                 "u": a.get("com_living_units") or 0,
                 "o0": (a.get("deeded_owner") or "").strip(),
+                "mn": " ".join((a.get("mail_name") or "").split()),
+                "ma": " ".join(" ".join(x for x in [(a.get("mail_addr_street") or "").strip(), (a.get("mail_unit") or "").strip()] if x).split()),
+                "mc": " ".join(x for x in [(a.get("mail_city") or "").strip() + ",", (a.get("mail_state") or "").strip(),
+                                          (a.get("mail_zip") or "").strip()[:5]] if x.strip(",")).strip(" ,"),
                 "lat": c[0] if c else None,
                 "lng": c[1] if c else None,
             })

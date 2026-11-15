@@ -106,33 +106,74 @@ def build(out: str):
 
     price_out = {area: {k: summarize(v) for k, v in kinds.items()} for area, kinds in prices.items()}
 
-    # ---- top owners ----
-    groups = defaultdict(lambda: defaultdict(lambda: {"names": defaultdict(int), "n": 0, "v": 0, "pins": []}))
-    for pin, p in parcels.items():
-        name = p.get("o") or p.get("o0") or ""
-        if not name:
-            continue
-        k = owner_key(name) or name
-        for area in (p.get("c", ""), "ALL"):
-            g = groups[area][k]
-            g["names"][name] += 1
-            g["n"] += 1
-            g["v"] += p.get("v") or 0
-            if len(g["pins"]) < 400:
-                g["pins"].append(pin)
-    owners_out = {}
-    for area, gs in groups.items():
-        top = sorted(gs.values(), key=lambda g: (-g["n"], -g["v"]))
+    # ---- top owners (by name and by tax-bill mailing address) ----
+    def addr_key(p):
+        a = store.norm_owner(p.get("ma", ""))
+        a = re.sub(r"\b(SUITE|STE|UNIT|APT|FL|FLOOR|RM|ROOM)\b", " ", a)
+        a = re.sub(r"\bCTR\b", "CENTER", a)
+        c = store.norm_owner(p.get("mc", ""))
+        return " ".join((a + " " + c).split()) if a else ""
+
+    def top(counter, k=1):
+        return [x for x, _ in sorted(counter.items(), key=lambda kv: -kv[1])[:k]]
+
+    def new_group():
+        return {"names": defaultdict(int), "n": 0, "v": 0, "pins": [], "mail": defaultdict(int),
+                "mailto": defaultdict(int), "addrkeys": defaultdict(int)}
+
+    owners_out, mail_out = {}, {}
+    areas = sorted({p.get("c", "") for p in parcels.values()} | {"ALL"})
+    by_area = {a: [p for p in parcels.values() if a == "ALL" or p.get("c") == a] for a in areas}
+    for area, plist in by_area.items():
+        by_name, by_addr = defaultdict(new_group), defaultdict(new_group)
+        for p in plist:
+            name = p.get("o") or p.get("o0") or ""
+            if not name:
+                continue
+            ak = addr_key(p)
+            label_addr = ", ".join(x for x in [p.get("ma", ""), p.get("mc", "")] if x)
+            for key, groups in ((owner_key(name) or name, by_name), (ak, by_addr)):
+                if not key:
+                    continue
+                g = groups[key]
+                g["names"][name] += 1
+                g["n"] += 1
+                g["v"] += p.get("v") or 0
+                if len(g["pins"]) < 400:
+                    g["pins"].append(p["pin"])
+                if label_addr:
+                    g["mail"][label_addr] += 1
+                mn = p.get("mn", "")
+                if mn and store.norm_owner(mn) != store.norm_owner(name):
+                    g["mailto"][mn] += 1
+                if ak:
+                    g["addrkeys"][ak] += 1
         rows = []
-        for g in top:
-            if g["n"] < 2:
+        for key, g in sorted(by_name.items(), key=lambda kv: (-kv[1]["n"], -kv[1]["v"])):
+            if g["n"] < 2 or len(rows) >= 60:
                 break
-            label = max(g["names"].items(), key=lambda kv: kv[1])[0]
+            label = top(g["names"])[0]
+            related = defaultdict(int)
+            for ak in g["addrkeys"]:
+                for nm, cnt in by_addr[ak]["names"].items():
+                    if (owner_key(nm) or nm) != key:
+                        related[nm] += cnt
             rows.append({"name": label, "n": g["n"], "v": round(g["v"]), "variants": len(g["names"]),
-                         "pub": 1 if PUBLIC.search(store.norm_owner(label)) else 0, "pins": g["pins"]})
-            if len(rows) >= 60:
-                break
+                         "pub": 1 if PUBLIC.search(store.norm_owner(label)) else 0, "pins": g["pins"],
+                         "mail": top(g["mail"], 2), "mailto": top(g["mailto"], 3),
+                         "related": [[nm, c] for nm, c in sorted(related.items(), key=lambda kv: -kv[1])[:12]]})
         owners_out[area] = rows
+        mrows = []
+        for key, g in sorted(by_addr.items(), key=lambda kv: (-kv[1]["n"], -kv[1]["v"])):
+            if g["n"] < 2 or len(mrows) >= 60:
+                break
+            names = sorted(g["names"].items(), key=lambda kv: -kv[1])
+            lead = names[0][0]
+            mrows.append({"name": top(g["mail"])[0] if g["mail"] else key, "n": g["n"], "v": round(g["v"]),
+                          "entities": len({owner_key(nm) or nm for nm, _ in names}),
+                          "pub": 1 if PUBLIC.search(store.norm_owner(lead)) else 0, "pins": g["pins"],
+                          "mailto": top(g["mailto"], 3), "related": [[nm, c] for nm, c in names[:12]]})
+        mail_out[area] = mrows
 
     # ---- search / parcel index ----
     index = []
@@ -166,7 +207,7 @@ def build(out: str):
     dump("recent.json", recent)
     dump("changes.json", changes)
     dump("prices.json", price_out)
-    dump("owners.json", owners_out)
+    dump("owners.json", {"name": owners_out, "mail": mail_out})
     dump("index.json", index)
     if os.path.isdir(store.HIST):
         for fn in os.listdir(store.HIST):

@@ -78,6 +78,20 @@ h3{margin:0;font-size:17px;letter-spacing:-.01em}
 .owners .ct{font-variant-numeric:tabular-nums;font-weight:600;font-size:13px}
 .owners .bar{grid-column:1/-1;height:6px;border-radius:3px;background:var(--accent);opacity:.8}
 .owners .row.pub .bar{background:var(--gray)}
+.collapse{width:100%;border:0;background:none;padding:0;margin:0;cursor:pointer;text-align:left}
+.collapse[aria-expanded="true"]{margin-bottom:10px}
+.collapse .sub{margin-left:auto}
+.chev{width:9px;height:9px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);transition:transform .15s;margin:0 4px 0 2px;flex:0 0 auto}
+.collapse[aria-expanded="true"] .chev{transform:rotate(45deg)}
+.owner-tools{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.odetail{margin:2px 2px 10px;padding:10px 12px;background:#f7f3fb;border:1px solid #e4d8f0;border-radius:10px;font-size:12.5px}
+.odetail .lbl{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin:8px 0 3px}
+.odetail .lbl:first-child{margin-top:0}
+.odetail .chips{display:flex;flex-wrap:wrap;gap:5px}
+.odetail .chip{border:1px solid #d9c9ea;background:#fff;border-radius:999px;padding:2px 9px;font-size:12px;cursor:pointer}
+.odetail .chip:hover{border-color:#7a3fb0;color:#7a3fb0}
+.odetail .links{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.odetail .links a,.odetail .links button{font-size:12px;padding:4px 9px}
 .foot{color:var(--muted);font-size:11.5px;padding:2px 4px 16px}
 .foot a{color:var(--accent)}
 

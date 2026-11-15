@@ -11,7 +11,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "
 const money = v => v ? "$" + Math.round(v).toLocaleString("en-US") : "—";
 const moneyS = v => { if (!v) return "—"; if (v >= 1e6) return "$" + (v / 1e6).toFixed(v >= 1e7 ? 1 : 2) + "M"; if (v >= 1e3) return "$" + Math.round(v / 1e3) + "K"; return "$" + v; };
 const fmtPin = p => p && p.length === 8 ? `${p.slice(0, 3)}-${p.slice(3, 5)}-${p.slice(5)}` : p;
-const title = s => String(s || "").toLowerCase().replace(/\b([a-z])/g, m => m.toUpperCase()).replace(/\b(Llc|Lp|Inc|Ii|Iii|Usa|Us|Na)\b/g, m => m.toUpperCase());
+const title = s => String(s || "").toLowerCase().replace(/\b([a-z])/g, m => m.toUpperCase()).replace(/\b(Llc|Lp|Inc|Ii|Iii|Usa|Us|Na|Oh)\b/g, m => m.toUpperCase());
 const cityShort = c => (AREAS.find(a => a[0] === c) || [c, title(c)])[1];
 const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
 const daysAgo = n => { const d = new Date(todayISO() + "T12:00:00"); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
@@ -19,7 +19,7 @@ const fmtDate = iso => { if (!iso) return ""; const [y, m, d] = iso.split("-").m
 const store = { get(k, d) { try { const v = localStorage.getItem("dw:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
                 set(k, v) { try { localStorage.setItem("dw:" + k, JSON.stringify(v)); } catch {} } };
 
-const S = { area: store.get("area", "ALL"), kind: "res", nonmarket: false, hidePublic: true,
+const S = { area: store.get("area", "ALL"), kind: "res", nonmarket: false, hidePublic: true, ownerMode: "name",
   meta: null, recent: [], changes: [], prices: {}, owners: {}, index: null, indexP: null, hist: {}, markers: new Map(), ownerLayer: null, sel: null };
 
 async function getJSON(path) { const r = await fetch(path, {cache: "no-cache"}); if (!r.ok) throw new Error(path + " " + r.status); return r.json(); }
@@ -123,17 +123,40 @@ function renderChart(ms) {
 }
 
 /* ---------------- owners ---------------- */
+const ENTITY = /\b(LLC|L L C|INC|CORP|CORPORATION|COMPANY|CO|LP|LLP|LTD|TRUST|PARTNERS|PARTNERSHIP|HOLDINGS|PROPERTIES|ASSOCIATION|FOUNDATION)\b/i;
+function ownerRows() {
+  const src = (S.owners && (S.owners[S.ownerMode] || (S.ownerMode === "name" && !S.owners.name ? S.owners : null))) || {};
+  return (src[S.area] || []).filter(o => !(S.hidePublic && o.pub)).slice(0, 12);
+}
 function renderOwners() {
-  const rows = (S.owners[S.area] || []).filter(o => !(S.hidePublic && o.pub)).slice(0, 12);
+  const rows = ownerRows();
+  $("#ownersSub").textContent = rows.length ? `${title(rows[0].name).slice(0, 26)}${rows[0].name.length > 26 ? "…" : ""} leads with ${rows[0].n}` : "";
   if (!rows.length) { $("#owners").innerHTML = `<p class="none">No owner data yet.</p>`; return; }
-  const max = rows[0].n;
-  $("#owners").innerHTML = rows.map((o, i) => `<div class="row ${o.pub ? "pub" : ""}" data-i="${i}" title="${esc(o.name)}${o.variants > 1 ? ` (${o.variants} name variants)` : ""}">
-    <div class="nm">${esc(title(o.name))}</div><div class="ct">${o.n}</div>
+  const max = rows[0].n, byMail = S.ownerMode === "mail";
+  $("#owners").innerHTML = rows.map((o, i) => `<div class="row ${o.pub ? "pub" : ""}" data-i="${i}" title="${esc(o.name)}">
+    <div class="nm">${esc(title(o.name))}${byMail && o.entities > 1 ? ` <span class="sub">· ${o.entities} owner names</span>` : ""}</div><div class="ct">${o.n}</div>
     <div class="bar" style="width:${Math.max(3, 100 * o.n / max)}%"></div></div>`).join("") +
-    `<p class="fine">Parcels owned${S.area === "ALL" ? " across the area" : " in " + cityShort(S.area)}. Name variants (LLC, Inc., punctuation) are merged. Tap a name to map its parcels.</p>`;
+    `<p class="fine">Parcels owned${S.area === "ALL" ? " across the area" : " in " + cityShort(S.area)}. ${byMail ? "Grouped by where the county mails the tax bills, which often ties together LLCs run by the same people." : "Name variants (LLC, Inc., punctuation) are merged."} Tap a row for details and to map its parcels.</p>`;
   $("#owners").querySelectorAll(".row").forEach(r => r.onclick = () => showOwner(rows[+r.dataset.i], r));
 }
+function ownerDetail(o) {
+  const byMail = S.ownerMode === "mail";
+  const chips = (list) => `<div class="chips">${list.map(([nm, c]) => `<button class="chip" data-q="${esc(nm)}">${esc(title(nm))} <b>${c}</b></button>`).join("")}</div>`;
+  let h = "";
+  if (!byMail && o.mail && o.mail.length) h += `<div class="lbl">Tax bills mailed to</div><div>${o.mail.map(m => esc(title(m))).join("<br>")}</div>`;
+  if (o.mailto && o.mailto.length) h += `<div class="lbl">Bill addressed to</div><div>${o.mailto.map(m => esc(title(m))).join("<br>")}</div>`;
+  if (o.related && o.related.length) h += `<div class="lbl">${byMail ? "Owners using this address" : "Other owners at the same mailing address"}</div>${chips(o.related)}`;
+  else if (!byMail) h += `<div class="lbl">Other owners at the same mailing address</div><div class="sub">None found${o.mail && o.mail.length ? "" : " (mailing address not loaded yet)"}.</div>`;
+  const entity = !byMail && ENTITY.test(o.name);
+  h += `<div class="links">${entity ? `<a class="btn" href="https://businesssearch.ohiosos.gov/" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">Ohio business filings</a><button class="btn" data-copy="${esc(o.name)}">Copy name</button>` : ""}</div>`;
+  if (entity) h += `<p class="fine">On the Ohio site, search the name to see the statutory agent and the organizer who signed the filing. Ohio doesn't list LLC members.</p>`;
+  const el = document.createElement("div"); el.className = "odetail"; el.id = "ownerDetail"; el.innerHTML = h;
+  el.querySelectorAll("[data-q]").forEach(b => b.onclick = e => { e.stopPropagation(); $("#q").value = b.dataset.q; onSearch(); $("#q").focus(); window.scrollTo({top: 0, behavior: "smooth"}); });
+  el.querySelectorAll("[data-copy]").forEach(b => b.onclick = async e => { e.stopPropagation(); try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "Copied"; } catch { b.textContent = b.dataset.copy; } });
+  return el;
+}
 function clearOwner() {
+  const d = document.getElementById("ownerDetail"); if (d) d.remove();
   document.querySelectorAll(".owners .row.on").forEach(x => x.classList.remove("on"));
   if (S.ownerLayer) { map.removeLayer(S.ownerLayer); S.ownerLayer = null; }
   const pill = document.getElementById("ownerPill"); if (pill) pill.remove();
@@ -145,6 +168,7 @@ async function showOwner(o, rowEl) {
   const had = !!S.sel; clearOwner();
   if (!had) S.prevView = [map.getCenter(), map.getZoom()];
   S.sel = o; rowEl.classList.add("on");
+  rowEl.after(ownerDetail(o));
   const pill = document.createElement("button"); pill.id = "ownerPill"; pill.className = "pill owner";
   pill.innerHTML = `${esc(title(o.name))} <b aria-hidden="true">×</b>`; pill.title = "Clear this owner from the map";
   pill.onclick = clearOwner; $(".maptools").appendChild(pill);
@@ -274,7 +298,11 @@ async function boot() {
   document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
   $("#dClose").onclick = closeDrawer;
   $("#nonmarket").onchange = e => { S.nonmarket = e.target.checked; renderMap(false); renderWeek(); };
-  $("#hidePublic").onchange = e => { S.hidePublic = e.target.checked; renderOwners(); };
+  $("#hidePublic").onchange = e => { S.hidePublic = e.target.checked; clearOwner(); renderOwners(); };
+  $("#ownerMode").querySelectorAll("button").forEach(b => b.onclick = () => { S.ownerMode = b.dataset.k; $("#ownerMode").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); clearOwner(); renderOwners(); });
+  const setOwnersOpen = open => { $("#ownersToggle").setAttribute("aria-expanded", open); $("#ownersBody").hidden = !open; if (!open) clearOwner(); store.set("ownersOpen", open); };
+  $("#ownersToggle").onclick = () => setOwnersOpen($("#ownersBody").hidden);
+  setOwnersOpen(store.get("ownersOpen", false));
   $("#priceKind").querySelectorAll("button").forEach(b => b.onclick = () => { S.kind = b.dataset.k; $("#priceKind").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); renderPrices(); });
   try {
     [S.meta, S.recent, S.changes, S.prices, S.owners] = await Promise.all(["meta", "recent", "changes", "prices", "owners"].map(n => getJSON(`data/${n}.json`)));

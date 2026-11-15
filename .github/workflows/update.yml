@@ -46,10 +46,10 @@ jobs:
           else m="backfill"; fi
           echo "mode=$m" >> "$GITHUB_OUTPUT"; echo "Mode: $m"
 
-      - name: Base parcel layer (weekly, or first run)
-        if: steps.mode.outputs.mode == 'nightly'
+      - name: Base parcel layer (weekly, first run, or when new fields are added)
         run: |
-          if [ ! -s data/parcels.jsonl ] || [ "$(date -u +%u)" = "7" ]; then python -m scraper base; fi
+          if [ ! -s data/parcels.jsonl ] || ! grep -q '"ma":' data/parcels.jsonl; then python -m scraper base;
+          elif [ "${{ steps.mode.outputs.mode }}" = "nightly" ] && [ "$(date -u +%u)" = "7" ]; then python -m scraper base; fi
 
       - name: Owner sweep (MyPlace)
         if: steps.mode.outputs.mode == 'nightly'
@@ -62,7 +62,6 @@ jobs:
           python -m scraper history --minutes ${{ steps.mode.outputs.mode == 'nightly' && 120 || 150 }}
 
       - name: Commit data
-        if: steps.mode.outputs.mode != 'build'
         env:
           GIT_AUTHOR_NAME: deedwatch-bot
           GIT_COMMITTER_NAME: deedwatch-bot

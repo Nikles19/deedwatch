@@ -133,11 +133,21 @@ function renderOwners() {
     `<p class="fine">Parcels owned${S.area === "ALL" ? " across the area" : " in " + cityShort(S.area)}. Name variants (LLC, Inc., punctuation) are merged. Tap a name to map its parcels.</p>`;
   $("#owners").querySelectorAll(".row").forEach(r => r.onclick = () => showOwner(rows[+r.dataset.i], r));
 }
-async function showOwner(o, rowEl) {
+function clearOwner() {
   document.querySelectorAll(".owners .row.on").forEach(x => x.classList.remove("on"));
   if (S.ownerLayer) { map.removeLayer(S.ownerLayer); S.ownerLayer = null; }
-  if (S.sel === o) { S.sel = null; return; }
+  const pill = document.getElementById("ownerPill"); if (pill) pill.remove();
+  if (S.sel && S.prevView) map.setView(S.prevView[0], S.prevView[1]);
+  S.sel = null;
+}
+async function showOwner(o, rowEl) {
+  if (S.sel === o) { clearOwner(); return; }
+  const had = !!S.sel; clearOwner();
+  if (!had) S.prevView = [map.getCenter(), map.getZoom()];
   S.sel = o; rowEl.classList.add("on");
+  const pill = document.createElement("button"); pill.id = "ownerPill"; pill.className = "pill owner";
+  pill.innerHTML = `${esc(title(o.name))} <b aria-hidden="true">×</b>`; pill.title = "Clear this owner from the map";
+  pill.onclick = clearOwner; $(".maptools").appendChild(pill);
   await loadIndex();
   const byPin = S.indexMap;
   const pts = o.pins.map(p => byPin.get(p)).filter(r => r && r[9]);
@@ -235,7 +245,7 @@ function renderAreas() {
   $("#areas").querySelectorAll("button").forEach(b => b.onclick = () => { S.area = b.dataset.a; store.set("area", S.area); renderAreas(); renderAll(true); });
 }
 function renderAll(fit) {
-  if (S.ownerLayer) { map.removeLayer(S.ownerLayer); S.ownerLayer = null; S.sel = null; }
+  if (S.sel) { S.prevView = null; clearOwner(); }
   renderMap(fit); renderWeek(); renderPrices(); renderOwners();
 }
 function renderFoot() {

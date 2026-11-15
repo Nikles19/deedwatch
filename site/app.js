@@ -124,16 +124,43 @@ function drawParcels(feats) {
       lyr.on("mouseover", () => lyr.setStyle({fillOpacity: .22, weight: 2}));
       lyr.on("mouseout", () => lyr.setStyle({fillOpacity: .04, weight: 1}));
       lyr.on("click", () => openParcel(info.pin, {a: info.addr, c: info.city, owner: info.owner}));
-      if (showLabels && labels < 500 && info.owner) {
-        const c = lyr.getBounds().getCenter();
-        const txt = shortOwner(info.owner), pt = map.latLngToContainerPoint(c);
-        const w = txt.length * 5.8 + 16, box = [pt.x - w / 2, pt.y - 10, pt.x + w / 2, pt.y + 10];
-        const free = view.contains(c) && !placed.some(q => box[0] < q[2] && box[2] > q[0] && box[1] < q[3] && box[3] > q[1]);
-        if (free) { labels++; placed.push(box);
-          labelLayer.addLayer(L.marker(c, {interactive: false, keyboard: false,
-            icon: L.divIcon({className: "plabel", iconSize: null, html: `<span>${esc(txt)}</span>`})})); }
+      if (showLabels && labels < 600 && info.owner) {
+        const lab = fitLabel(lyr, info.owner, view);
+        if (lab && !placed.some(q => lab.box[0] < q[2] && lab.box[2] > q[0] && lab.box[1] < q[3] && lab.box[3] > q[1])) {
+          labels++; placed.push(lab.box);
+          labelLayer.addLayer(L.marker(lab.at, {interactive: false, keyboard: false,
+            icon: L.divIcon({className: "plabel", iconSize: null,
+              html: `<span style="transform:translate(-50%,-50%) rotate(${lab.deg}deg)">${esc(lab.txt)}</span>`})}));
+        }
       }
     }}).eachLayer(l => parcelLayer.addLayer(l));
+}
+/* Fit an owner label inside a parcel: run it along the lot's long side, trimmed to the lot's length. */
+const CHAR_W = 5.4, LABEL_H = 13;
+function fitLabel(lyr, owner, view) {
+  let ring = lyr.getLatLngs(); while (Array.isArray(ring[0])) ring = ring[0];
+  if (!ring || ring.length < 3) return null;
+  const pts = ring.map(ll => map.latLngToContainerPoint(ll));
+  let best = 0, ang = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length], dx = b.x - a.x, dy = b.y - a.y, len = dx * dx + dy * dy;
+    if (len > best) { best = len; ang = Math.atan2(dy, dx); }
+  }
+  if (ang > Math.PI / 2) ang -= Math.PI; else if (ang < -Math.PI / 2) ang += Math.PI;
+  const ux = Math.cos(ang), uy = Math.sin(ang), vx = -uy, vy = ux;
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+  for (const p of pts) { const u = p.x * ux + p.y * uy, v = p.x * vx + p.y * vy; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+  const long = u1 - u0, short = v1 - v0;
+  if (short < LABEL_H - 1) return null;
+  const fit = Math.floor((long - 10) / CHAR_W);
+  if (fit < 4) return null;
+  let txt = title(owner).replace(/\s+/g, " ");
+  if (txt.length > fit) txt = txt.slice(0, fit - 1).trimEnd() + "…";
+  const um = (u0 + u1) / 2, vm = (v0 + v1) / 2, cx = um * ux + vm * vx, cy = um * uy + vm * vy;
+  const at = map.containerPointToLatLng([cx, cy]);
+  if (!view.contains(at)) return null;
+  const w = txt.length * CHAR_W + 8, h = LABEL_H, W = Math.abs(w * ux) + Math.abs(h * vx), H = Math.abs(w * uy) + Math.abs(h * vy);
+  return {txt, at, deg: ang * 180 / Math.PI, box: [cx - W / 2, cy - H / 2, cx + W / 2, cy + H / 2]};
 }
 const shortOwner = o => { const t = title(o).replace(/,?\s+(LLC|Inc|Et Al|Trustee|Tr|Trs)\.?$/i, m => m); return t.length > 22 ? t.slice(0, 21) + "…" : t; };
 function inArea(c) { return S.area === "ALL" || c === S.area; }

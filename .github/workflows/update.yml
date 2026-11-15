@@ -55,6 +55,11 @@ jobs:
         if: steps.mode.outputs.mode == 'nightly'
         run: python -m scraper sweep
 
+      - name: Police reports
+        if: steps.mode.outputs.mode != 'build'
+        continue-on-error: true
+        run: python -m scraper police --minutes ${{ steps.mode.outputs.mode == 'nightly' && 25 || 20 }}
+
       - name: Sale histories
         if: steps.mode.outputs.mode != 'build'
         run: |
@@ -77,8 +82,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          rem=$(python -c "import json;print(json.load(open('data/state.json')).get('history',{}).get('remaining',0))")
-          echo "Parcels still without history: $rem"
+          rem=$(python -c "
+          import json; s=json.load(open('data/state.json')); p=s.get('police',{})
+          from scraper.police import AGENCIES
+          todo = s.get('history',{}).get('remaining',0) + p.get('pending',0) + sum(1 for a in AGENCIES if not p.get(f'back_{a}'))
+          print(todo)")
+          echo "Work still to do (parcels without history + police backlog): $rem"
           if [ "$rem" -gt 0 ]; then gh workflow run update.yml --ref main -f mode=backfill; fi
 
       - name: Build site

@@ -220,6 +220,13 @@ def build(out: str):
     dump("prices.json", price_out)
     dump("owners.json", {"name": owners_out, "mail": mail_out})
     dump("index.json", index)
+    from . import police as _police
+    pol = []
+    for r in _police.load().values():
+        if r.get("lat") and r["d"] >= d400:
+            pol.append([r["c"], r["d"], r["t"][:1], "; ".join(r.get("off") or []), r["loc"], r["lat"], r["lng"], r.get("pdf", ""), r["n"]])
+    pol.sort(key=lambda x: x[1], reverse=True)
+    dump("police.json", {"base": _police.BASE, "reports": pol, "state": state.get("police")})
     if os.path.isdir(store.HIST):
         for fn in os.listdir(store.HIST):
             if fn.endswith(".json"):

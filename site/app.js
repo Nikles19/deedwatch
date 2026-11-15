@@ -396,9 +396,42 @@ function renderAreas() {
   $("#areas").innerHTML = AREAS.map(([k, n]) => `<button role="tab" data-a="${k}" class="${k === S.area ? "on" : ""}">${n}</button>`).join("");
   $("#areas").querySelectorAll("button").forEach(b => b.onclick = () => { S.area = b.dataset.a; store.set("area", S.area); renderAreas(); renderAll(true); });
 }
+/* ---------------- police reports ---------------- */
+let policeLayer;
+function policeCat(off, t) {
+  const o = String(off || "").toUpperCase();
+  if (t === "A" || /OVI|TRAFFIC|ACCIDENT|CRASH|DRIV|LICENSE|HIT-SKIP|PARKING/.test(o)) return ["Traffic", "#2b6cb0"];
+  if (/ASSAULT|ROBBERY|MENAC|DOMESTIC|WEAPON|SHOOT|GUN|RAPE|SEX|KIDNAP|THREAT|HOMICIDE|FELONIOUS|STRANGULATION|INTIMIDAT/.test(o)) return ["Violent", "#c53030"];
+  if (/THEFT|BURGLAR|BREAKING|VANDAL|DAMAG|FRAUD|STOLEN|TRESPASS|ARSON|FORGERY|IDENTITY|SHOPLIFT|RECEIVING|LARCENY|MISCHIEF/.test(o)) return ["Property", "#c47f00"];
+  return ["Other", "#718096"];
+}
+async function renderPolice() {
+  if (!policeLayer) policeLayer = L.layerGroup().addTo(map);
+  policeLayer.clearLayers();
+  const on = $("#policeOn").checked;
+  $("#policeDays").hidden = !on; $("#policeLegend").hidden = !on;
+  if (!on) { $("#policeLbl").textContent = "Police reports"; return; }
+  if (!S.police) {
+    $("#policeLbl").textContent = "Loading…";
+    try { S.police = await getJSON("data/police.json"); } catch { S.police = {reports: []}; }
+  }
+  const since = daysAgo(+$("#policeDays").value), base = S.police.base || "";
+  const rows = (S.police.reports || []).filter(r => r[1] >= since && inArea(r[0]));
+  const rend = L.canvas({padding: .3});
+  for (const r of rows) {
+    const [cat, col] = policeCat(r[3], r[2]);
+    const what = r[3] ? title(r[3]) : (r[2] === "A" ? "Traffic crash" : "Incident (details not read yet)");
+    const m = L.circleMarker([r[5], r[6]], {renderer: rend, radius: 5.5, color: "#fff", weight: 1.2, fillColor: col, fillOpacity: .9});
+    m.bindTooltip(`<b>${esc(what)}</b><br>${fmtDate(r[1])} · ${esc(title(r[4].replace(/^(\d+),(.*)$/, "$1 $2").replace(/^([^,\d][^,]*),(\d+)$/, "$2 $1")))}`, {direction: "top"});
+    m.bindPopup(`<div class="ppop"><b>${esc(what)}</b><br>${cat} · ${fmtDate(r[1])}<br>${esc(title(r[4]))} · ${esc(cityShort(r[0]))}<br>Report ${esc(r[8])}${r[7] ? `<br><a href="${esc(base + r[7])}" target="_blank" rel="noopener">Open the police report (PDF)</a>` : ""}</div>`);
+    policeLayer.addLayer(m);
+  }
+  $("#policeLbl").textContent = `Police reports (${rows.length})`;
+}
+
 function renderAll(fit) {
   if (S.sel) { S.prevView = null; clearOwner(); }
-  renderMap(fit); renderWeek(); renderPrices(); renderOwners();
+  renderMap(fit); renderWeek(); renderPrices(); renderOwners(); if ($("#policeOn").checked) renderPolice();
 }
 function renderFoot() {
   const m = S.meta || {};
@@ -425,6 +458,8 @@ async function boot() {
   document.addEventListener("click", e => { if (!e.target.closest(".search")) $("#results").hidden = true; });
   document.addEventListener("keydown", e => { if (e.key === "Escape") { if ($("#drawer").classList.contains("on")) closeDrawer(); else if (document.body.classList.contains("mapfull")) setFull(false); } });
   $("#dClose").onclick = closeDrawer;
+  $("#policeOn").onchange = renderPolice;
+  $("#policeDays").onchange = renderPolice;
   $("#nonmarket").onchange = e => { S.nonmarket = e.target.checked; renderMap(false); renderWeek(); };
   $("#hidePublic").onchange = e => { S.hidePublic = e.target.checked; clearOwner(); renderOwners(); };
   $("#ownerMode").querySelectorAll("button").forEach(b => b.onclick = () => { S.ownerMode = b.dataset.k; $("#ownerMode").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); clearOwner(); renderOwners(); });

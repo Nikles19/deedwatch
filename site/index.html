@@ -35,6 +35,9 @@
     <div class="maptools">
       <span class="pill"><svg class="ico" viewBox="0 0 20 20"><path d="M3 10 10 4l7 6v7h-5v-4H8v4H3z"/></svg><span id="mapcount">Sales in the last 60 days</span></span>
       <label class="pill toggle"><input type="checkbox" id="nonmarket"> Include $0 &amp; non-market transfers</label>
+      <label class="pill toggle"><input type="checkbox" id="policeOn"> <span id="policeLbl">Police reports</span></label>
+      <select class="pill sel" id="policeDays" hidden aria-label="Police report period"><option value="30">Last 30 days</option><option value="90" selected>Last 90 days</option><option value="365">Last 12 months</option></select>
+      <span class="pill legend" id="policeLegend" hidden><i style="background:#c53030"></i>Violent <i style="background:#c47f00"></i>Property <i style="background:#2b6cb0"></i>Traffic <i style="background:#718096"></i>Other</span>
     </div>
   </section>
 

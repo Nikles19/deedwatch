@@ -158,6 +158,11 @@ def cmd_history(args):
     log(f"history done: {done} fetched, {fail} failed, {remaining} parcels still without history")
 
 
+def cmd_police(args):
+    from . import police
+    police.run(minutes=args.minutes, days=args.days)
+
+
 def cmd_build(args):
     from .build import build
     build(args.out)
@@ -177,6 +182,10 @@ def main():
     h.add_argument("--interval", type=float, default=0.5)
     h.add_argument("--refresh-days", type=int, default=0)
     h.set_defaults(fn=cmd_history)
+    pol = sub.add_parser("police")
+    pol.add_argument("--minutes", type=float, default=30)
+    pol.add_argument("--days", type=int, default=10)
+    pol.set_defaults(fn=cmd_police)
     b = sub.add_parser("build")
     b.add_argument("--out", default="_site")
     b.set_defaults(fn=cmd_build)

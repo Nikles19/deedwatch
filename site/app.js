@@ -35,7 +35,8 @@ function houseIcon(market, recentWeek) {
 const COUNTY = "https://gis.cuyahogacounty.gov/server/rest/services/";
 const PARCEL_ZOOM = 16, LABEL_ZOOM = 18;
 function initMap() {
-  map = L.map("map", {zoomControl: false, maxZoom: 21}).setView(UH, 15);
+  map = L.map("map", {zoomControl: false, maxZoom: 21, rotate: true, bearing: 0, touchRotate: true, shiftKeyRotate: true,
+    rotateControl: {closeOnZeroBearing: false, position: "bottomright"}}).setView(UH, 15);
   L.control.zoom({position: "bottomright"}).addTo(map);
   const esriAttr = 'Tiles &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors';
   const bases = {
@@ -50,11 +51,12 @@ function initMap() {
   pick.addTo(map);
   L.control.layers(bases, null, {position: "topright", collapsed: true}).addTo(map);
   map.on("baselayerchange", e => store.set("base", e.name));
-  map.createPane("parcels"); map.getPane("parcels").style.zIndex = 390;
+  map.createPane("parcels", map.getPane("rotatePane") || undefined); map.getPane("parcels").style.zIndex = 390;
   parcelLayer = L.featureGroup([], {pane: "parcels"}).addTo(map);
   labelLayer = L.layerGroup().addTo(map);
   saleLayer = L.layerGroup().addTo(map);
   map.on("moveend", () => { clearTimeout(parcelTimer); parcelTimer = setTimeout(loadParcels, 250); });
+  map.on("rotate", () => { clearTimeout(S.rotTimer); S.rotTimer = setTimeout(() => { if (S.lastFeats && map.getZoom() >= PARCEL_ZOOM) drawParcels(S.lastFeats); }, 200); });
   const Full = L.Control.extend({options: {position: "bottomright"}, onAdd() {
     const b = L.DomUtil.create("button", "leaflet-bar fullbtn");
     b.type = "button"; b.title = "Full-screen map"; b.setAttribute("aria-label", "Full-screen map");
@@ -147,7 +149,7 @@ function fitLabel(lyr, owner, view) {
     if (len > best) { best = len; ang = Math.atan2(dy, dx); }
   }
   if (ang > Math.PI / 2) ang -= Math.PI; else if (ang < -Math.PI / 2) ang += Math.PI;
-  if (ang > Math.PI * 0.45) ang -= Math.PI;  // near-vertical lots: always read bottom-to-top
+  if (ang > Math.PI / 3) ang -= Math.PI;  // steep lots: always read bottom-to-top, like the rest
   const ux = Math.cos(ang), uy = Math.sin(ang), vx = -uy, vy = ux;
   let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
   for (const p of pts) { const u = p.x * ux + p.y * uy, v = p.x * vx + p.y * vy; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }

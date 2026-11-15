@@ -161,8 +161,9 @@ function drawParcels(feats) {
       lyr.on("mouseover", () => lyr.setStyle({fillOpacity: .22, weight: 2}));
       lyr.on("mouseout", () => lyr.setStyle(pStyle(info.pin)));
       lyr.on("click", () => openParcel(info.pin, {a: info.addr, c: info.city, owner: info.owner}));
-      if (showLabels && labels < 600 && info.owner) {
-        const lab = fitLabel(lyr, info.owner, view);
+      const ltxt = showLabels && labels < 600 ? labelText(info) : "";
+      if (ltxt) {
+        const lab = fitLabel(lyr, ltxt, view);
         if (lab && !placed.some(q => lab.box[0] < q[2] && lab.box[2] > q[0] && lab.box[1] < q[3] && lab.box[3] > q[1])) {
           labels++; placed.push(lab.box);
           labelLayer.addLayer(L.marker(lab.at, {interactive: false, keyboard: false,
@@ -171,6 +172,23 @@ function drawParcels(feats) {
         }
       }
     }}).eachLayer(l => parcelLayer.addLayer(l));
+}
+/* What each lot says when zoomed in: owner, address, last market sale, or nothing (menu > Lot labels). */
+S.labelMode = store.get("labelMode", "name");
+function labelText(info) {
+  if (S.labelMode === "none") return "";
+  if (S.labelMode === "addr") return info.addr;
+  if (S.labelMode === "price") {
+    const ix = S.indexMap && S.indexMap.get(info.pin);
+    return ix && ix[11] ? `${moneyS(ix[11])} '${String(ix[12]).slice(2, 4)}` : "";
+  }
+  return info.owner;
+}
+function setLabelMode(m) {
+  S.labelMode = m; store.set("labelMode", m);
+  $("#labelSeg").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.l === m));
+  const redraw = () => { if (S.lastFeats && map.getZoom() >= PARCEL_ZOOM) drawParcels(S.lastFeats); };
+  redraw(); if (m === "price" && !S.index) loadIndex().then(redraw).catch(() => {});
 }
 /* Fit an owner label inside a parcel: run it along the lot's long side, trimmed to the lot's length. */
 const CHAR_W = 5.4, LABEL_H = 13;
@@ -406,7 +424,6 @@ async function openParcel(pin, row, pan) {
   $("#dBody").innerHTML = `<p class="none">Loading history…</p>`;
   $("#drawer").classList.add("on"); $("#drawer").setAttribute("aria-hidden", "false");
   if (lat && pan) map.setView([lat, lng], Math.max(map.getZoom(), 16));
-  if (lat && S.focusPin !== pin) setFocus(pin, lat, lng, a, row);
   document.querySelectorAll(".house.sel").forEach(x => x.classList.remove("sel"));
   const mk = S.markers.get(pin); if (mk && mk._icon) mk._icon.classList.add("sel");
   const hist = await loadHistory(pin);
@@ -520,6 +537,8 @@ async function boot() {
   });
   document.addEventListener("click", e => { if (!e.target.closest(".search")) $("#results").hidden = true; if (!e.composedPath().some(n => n.classList && n.classList.contains("menuwrap"))) setMenu(false); });
   $("#menuBtn").onclick = () => setMenu($("#menu").hidden);
+  $("#labelSeg").querySelectorAll("button").forEach(b => b.onclick = () => setLabelMode(b.dataset.l));
+  setLabelMode(S.labelMode);
   document.addEventListener("keydown", e => { if (e.key === "Escape") { if (!$("#menu").hidden) setMenu(false); else if ($("#drawer").classList.contains("on")) closeDrawer(); else if (document.body.classList.contains("mapfull")) setFull(false); } });
   $("#dClose").onclick = closeDrawer;
   $("#policeOn").onchange = renderPolice;

@@ -196,8 +196,12 @@ def build(out: str):
             names.update(t.get("gr") or [])
         cur = p.get("o") or p.get("o0") or ""
         names.discard(cur)
+        sales = [t for t in hist.get(pin, []) if (t.get("p") or 0) >= 10000 and (t.get("n") or 1) == 1
+                 and not re.search(r"quit|sheriff", t.get("t") or "", re.I)]
+        last = max(sales, key=lambda t: t.get("d") or "") if sales else None
         index.append([pin, p.get("a", ""), p.get("c", ""), cur, "|".join(sorted(names)), p.get("cls", ""),
-                      p.get("luc", ""), p.get("v") or 0, p.get("sf") or 0, p.get("lat"), p.get("lng")])
+                      p.get("luc", ""), p.get("v") or 0, p.get("sf") or 0, p.get("lat"), p.get("lng"),
+                      last["p"] if last else 0, (last.get("d") or "")[:7] if last else ""])
 
     with_hist = sum(1 for p in parcels.values() if p.get("hs"))
     meta = {

@@ -65,6 +65,7 @@ body.mapfull .mapcol{padding-top:env(safe-area-inset-top)}
 .menu .seg button{flex:1;padding:6px 8px;font-size:13px}
 .seg.wide{display:flex}
 .seg.wide button{flex:1}
+.mnote{text-transform:none;letter-spacing:0;font-weight:400}
 .mstatus{margin:12px 0 0;font-size:12px;color:#7a5a00;background:#fff7e0;border-radius:8px;padding:6px 9px}
 .mstatus:empty{display:none}
 .areas button.on{background:var(--accent);border-color:var(--accent);color:#fff}

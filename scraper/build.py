@@ -39,6 +39,17 @@ def build(out: str):
     if os.path.isdir(out):
         shutil.rmtree(out)
     shutil.copytree(os.path.join(root, "site"), out)
+    # cache-bust the app files so browsers pick up new versions right away
+    import hashlib
+    idx_path = os.path.join(out, "index.html")
+    with open(idx_path) as f:
+        html = f.read()
+    for asset in ("app.js", "styles.css"):
+        with open(os.path.join(out, asset), "rb") as f:
+            v = hashlib.sha1(f.read()).hexdigest()[:10]
+        html = html.replace(f'"{asset}"', f'"{asset}?v={v}"')
+    with open(idx_path, "w") as f:
+        f.write(html)
     data_dir = os.path.join(out, "data")
     os.makedirs(os.path.join(data_dir, "h"), exist_ok=True)
 

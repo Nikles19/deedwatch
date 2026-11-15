@@ -32,13 +32,98 @@ function houseIcon(market, recentWeek) {
   return L.divIcon({className: "house", iconSize: [size, size], iconAnchor: [size / 2, size - 2],
     html: `<svg width="${size}" height="${size}" viewBox="0 0 24 24"><path d="M12 2.5 1.8 11.3h3v9.7h5.6v-6h3.2v6h5.6v-9.7h3z" fill="${fill}" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>`});
 }
+const COUNTY = "https://gis.cuyahogacounty.gov/server/rest/services/";
+const PARCEL_ZOOM = 16, LABEL_ZOOM = 18;
 function initMap() {
-  map = L.map("map", {zoomControl: false}).setView(UH, 14);
+  map = L.map("map", {zoomControl: false, maxZoom: 21}).setView(UH, 15);
   L.control.zoom({position: "bottomright"}).addTo(map);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
+  const esriAttr = 'Tiles &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors';
+  const bases = {
+    "Streets": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {maxZoom: 21, maxNativeZoom: 19, attribution: esriAttr}),
+    "Aerial (County 2026)": L.layerGroup([
+      L.tileLayer(COUNTY + "IMAGERY/2026_Fall_Aerial/MapServer/tile/{z}/{y}/{x}", {maxZoom: 21, maxNativeZoom: 21, attribution: "Imagery &copy; Cuyahoga County"}),
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {maxZoom: 21, maxNativeZoom: 19, opacity: .9}),
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {maxZoom: 21, maxNativeZoom: 19})]),
+    "MyPlace (County)": L.tileLayer(COUNTY + "MyPlace/MyPLACE_Parcel_Fabric_Basemap/MapServer/tile/{z}/{y}/{x}", {minZoom: 10, maxZoom: 21, zoomOffset: -10, attribution: "&copy; Cuyahoga County"}),
+  };
+  const pick = bases[store.get("base", "Streets")] || bases.Streets;
+  pick.addTo(map);
+  L.control.layers(bases, null, {position: "topright", collapsed: true}).addTo(map);
+  map.on("baselayerchange", e => store.set("base", e.name));
+  map.createPane("parcels"); map.getPane("parcels").style.zIndex = 390;
+  parcelLayer = L.featureGroup([], {pane: "parcels"}).addTo(map);
+  labelLayer = L.layerGroup().addTo(map);
   saleLayer = L.layerGroup().addTo(map);
+  map.on("moveend", () => { clearTimeout(parcelTimer); parcelTimer = setTimeout(loadParcels, 250); });
 }
+
+/* ---------------- every parcel, once zoomed in ---------------- */
+let parcelLayer, labelLayer, parcelTimer, parcelAbort, parcelRenderer;
+async function countyParcels(b, signal) {
+  const feats = [];
+  for (const layer of [1, 0]) {
+    for (let offset = 0; offset < 6000; offset += 2000) {
+      const q = new URLSearchParams({geometry: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(","), geometryType: "esriGeometryEnvelope",
+        inSR: 4326, spatialRel: "esriSpatialRelIntersects", outFields: "parcelpin,par_addr_all,par_city,deeded_owner", returnGeometry: true,
+        outSR: 4326, geometryPrecision: 6, f: "geojson", resultOffset: offset, resultRecordCount: 2000});
+      const r = await fetch(`${COUNTY}Open_Data_Parcels/MapServer/${layer}/query?${q}`, {signal});
+      const j = await r.json();
+      const fs = j.features || [];
+      feats.push(...fs);
+      if (fs.length < 2000 && !(j.properties && j.properties.exceededTransferLimit)) break;
+    }
+  }
+  return feats;
+}
+function parcelInfo(f) {
+  const p = f.properties || {}, pin = String(p.parcelpin || "").trim();
+  const ix = S.indexMap && S.indexMap.get(pin);
+  const addr = (ix && ix[1]) || String(p.par_addr_all || "").split(",")[0].replace(/\s+/g, " ").trim();
+  return {pin, addr, owner: (ix && ix[3]) || p.deeded_owner || "", city: (ix && ix[2]) || p.par_city || ""};
+}
+async function loadParcels() {
+  const z = map.getZoom();
+  if (z < PARCEL_ZOOM) { parcelLayer.clearLayers(); labelLayer.clearLayers(); S.parcelBounds = null; return; }
+  const b = map.getBounds().pad(0.15);
+  if (S.parcelBounds && S.parcelBounds.contains(map.getBounds())) {
+    if (S.parcelLabels !== (z >= LABEL_ZOOM) || z >= LABEL_ZOOM) { S.parcelLabels = z >= LABEL_ZOOM; drawParcels(S.lastFeats); }
+    return;
+  }
+  loadIndex().then(() => { if (S.lastFeats) drawParcels(S.lastFeats); }).catch(() => {});
+  if (parcelAbort) parcelAbort.abort();
+  parcelAbort = new AbortController();
+  try {
+    const feats = await countyParcels(b, parcelAbort.signal);
+    S.parcelBounds = b; S.parcelLabels = z >= LABEL_ZOOM; S.lastFeats = feats;
+    drawParcels(feats);
+  } catch (e) { if (e.name !== "AbortError") console.warn("parcels", e); }
+}
+function drawParcels(feats) {
+  parcelRenderer = parcelRenderer || L.canvas({pane: "parcels", padding: .3, tolerance: 3});
+  parcelLayer.clearLayers(); labelLayer.clearLayers();
+  const showLabels = map.getZoom() >= LABEL_ZOOM, view = map.getBounds();
+  let labels = 0; const placed = [];
+  L.geoJSON({type: "FeatureCollection", features: feats}, {
+    renderer: parcelRenderer, pane: "parcels",
+    style: {color: "#5b4a8a", weight: 1, opacity: .75, fillColor: "#7a3fb0", fillOpacity: .04},
+    onEachFeature: (f, lyr) => {
+      const info = parcelInfo(f);
+      lyr.bindTooltip(`<b>${esc(title(info.addr) || fmtPin(info.pin))}</b><br>${esc(title(info.owner))}`, {sticky: true});
+      lyr.on("mouseover", () => lyr.setStyle({fillOpacity: .22, weight: 2}));
+      lyr.on("mouseout", () => lyr.setStyle({fillOpacity: .04, weight: 1}));
+      lyr.on("click", () => openParcel(info.pin, {a: info.addr, c: info.city, owner: info.owner}));
+      if (showLabels && labels < 500 && info.owner) {
+        const c = lyr.getBounds().getCenter();
+        const txt = shortOwner(info.owner), pt = map.latLngToContainerPoint(c);
+        const w = txt.length * 5.8 + 6, box = [pt.x - w / 2, pt.y - 8, pt.x + w / 2, pt.y + 8];
+        const free = view.contains(c) && !placed.some(q => box[0] < q[2] && box[2] > q[0] && box[1] < q[3] && box[3] > q[1]);
+        if (free) { labels++; placed.push(box);
+          labelLayer.addLayer(L.marker(c, {interactive: false, keyboard: false,
+            icon: L.divIcon({className: "plabel", iconSize: null, html: `<span>${esc(txt)}</span>`})})); }
+      }
+    }}).eachLayer(l => parcelLayer.addLayer(l));
+}
+const shortOwner = o => { const t = title(o).replace(/,?\s+(LLC|Inc|Et Al|Trustee|Tr|Trs)\.?$/i, m => m); return t.length > 22 ? t.slice(0, 21) + "…" : t; };
 function inArea(c) { return S.area === "ALL" || c === S.area; }
 function renderMap(fit) {
   saleLayer.clearLayers(); S.markers.clear();
@@ -49,7 +134,8 @@ function renderMap(fit) {
   for (const r of rows) {
     if (seen.has(r.pin)) continue; seen.add(r.pin); n++;
     const mk = L.marker([r.lat, r.lng], {icon: houseIcon(r.m, r.d >= week), riseOnHover: true, zIndexOffset: r.m ? 100 : 0});
-    mk.bindTooltip(`<b>${esc(title(r.a))}</b><br>${r.p ? money(r.p) : "No sale price"} · ${fmtDate(r.d)}`, {direction: "top", offset: [0, -14]});
+    const own = (S.indexMap && S.indexMap.get(r.pin) && S.indexMap.get(r.pin)[3]) || r.buyer;
+    mk.bindTooltip(`<b>${esc(title(r.a))}</b><br>${esc(title(own))}<br><span class="tt-d">Sold ${fmtDate(r.d)}</span>`, {direction: "top", offset: [0, -14]});
     mk.on("click", () => openParcel(r.pin, r));
     mk.addTo(saleLayer); S.markers.set(r.pin, mk);
   }
@@ -243,7 +329,7 @@ async function openParcel(pin, row, pan) {
   const mk = S.markers.get(pin); if (mk && mk._icon) mk._icon.classList.add("sel");
   const hist = await loadHistory(pin);
   const kv = pairs => `<dl class="kv">${pairs.filter(p => p[1]).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
-  const owner = (ix && ix[3]) || "";
+  const owner = (ix && ix[3]) || (row && (row.owner || row.buyer)) || "";
   const histHtml = hist == null ? `<p class="none">Sale history for this parcel hasn't been loaded yet. The nightly job is still working through the area.</p>`
     : !hist.length ? `<p class="none">No recorded transfers.</p>`
     : `<ul class="hist">${hist.map(t => { const market = t.p >= 10000 && t.n === 1 && !/quit|sheriff/i.test(t.t);

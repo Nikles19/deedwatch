@@ -147,6 +147,7 @@ function fitLabel(lyr, owner, view) {
     if (len > best) { best = len; ang = Math.atan2(dy, dx); }
   }
   if (ang > Math.PI / 2) ang -= Math.PI; else if (ang < -Math.PI / 2) ang += Math.PI;
+  if (ang > Math.PI * 0.45) ang -= Math.PI;  // near-vertical lots: always read bottom-to-top
   const ux = Math.cos(ang), uy = Math.sin(ang), vx = -uy, vy = ux;
   let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
   for (const p of pts) { const u = p.x * ux + p.y * uy, v = p.x * vx + p.y * vy; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }

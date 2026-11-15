@@ -47,10 +47,8 @@ function initMap() {
       L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {maxZoom: 21, maxNativeZoom: 19})]),
     "MyPlace (County)": L.tileLayer(COUNTY + "MyPlace/MyPLACE_Parcel_Fabric_Basemap/MapServer/tile/{z}/{y}/{x}", {minZoom: 10, maxZoom: 21, zoomOffset: -10, attribution: "&copy; Cuyahoga County"}),
   };
-  const pick = bases[store.get("base", "Streets")] || bases.Streets;
-  pick.addTo(map);
-  L.control.layers(bases, null, {position: "topright", collapsed: true}).addTo(map);
-  map.on("baselayerchange", e => store.set("base", e.name));
+  S.bases = bases;
+  setBase(bases[store.get("base")] ? store.get("base") : "Streets");
   map.createPane("parcels", map.getPane("rotatePane") || undefined); map.getPane("parcels").style.zIndex = 390;
   parcelLayer = L.featureGroup([], {pane: "parcels"}).addTo(map);
   labelLayer = L.layerGroup().addTo(map);
@@ -65,6 +63,13 @@ function initMap() {
     b.onclick = () => setFull(!document.body.classList.contains("mapfull"));
     return b; }});
   map.addControl(new Full());
+}
+function setBase(name) {
+  for (const [k, l] of Object.entries(S.bases)) { if (k === name) { if (!map.hasLayer(l)) l.addTo(map); } else if (map.hasLayer(l)) map.removeLayer(l); }
+  store.set("base", name);
+  const seg = $("#baseSeg");
+  seg.innerHTML = Object.keys(S.bases).map(k => `<button data-b="${esc(k)}" class="${k === name ? "on" : ""}">${esc(k.replace(/ \(.*\)$/, ""))}</button>`).join("");
+  seg.querySelectorAll("button").forEach(b => b.onclick = () => setBase(b.dataset.b));
 }
 function setFull(on) {
   document.body.classList.toggle("mapfull", on);
@@ -181,7 +186,7 @@ function renderMap(fit) {
     mk.on("click", () => openParcel(r.pin, r));
     mk.addTo(saleLayer); S.markers.set(r.pin, mk);
   }
-  $("#mapcount").textContent = `${n} ${S.nonmarket ? "transfers" : "sales"} in the last ${MAP_DAYS} days`;
+  $("#mapcount").textContent = `${n} ${S.nonmarket ? "transfers" : "sales"} shown${S.area === "ALL" ? "" : " in " + cityShort(S.area)}`;
   if (fit && rows.length && S.area !== "ALL") map.fitBounds(L.latLngBounds(rows.map(r => [r.lat, r.lng])).pad(0.1), {maxZoom: 15});
   if (fit && S.area === "ALL") map.setView(UH, 14);
 }
@@ -392,7 +397,17 @@ async function openParcel(pin, row, pan) {
 function closeDrawer() { $("#drawer").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true"); document.querySelectorAll(".house.sel").forEach(x => x.classList.remove("sel")); }
 
 /* ---------------- wiring ---------------- */
+function menuState() {
+  const a = AREAS.find(x => x[0] === S.area);
+  $("#menuLbl").textContent = a ? a[1] : "Area";
+  $("#menuDot").hidden = !(S.nonmarket || $("#policeOn").checked);
+}
+function setMenu(open) {
+  $("#menu").hidden = !open; $("#menuBtn").setAttribute("aria-expanded", open);
+  if (open) $("#results").hidden = true;
+}
 function renderAreas() {
+  menuState();
   $("#areas").innerHTML = AREAS.map(([k, n]) => `<button role="tab" data-a="${k}" class="${k === S.area ? "on" : ""}">${n}</button>`).join("");
   $("#areas").querySelectorAll("button").forEach(b => b.onclick = () => { S.area = b.dataset.a; store.set("area", S.area); renderAreas(); renderAll(true); });
 }
@@ -409,13 +424,14 @@ async function renderPolice() {
   if (!policeLayer) policeLayer = L.layerGroup().addTo(map);
   policeLayer.clearLayers();
   const on = $("#policeOn").checked;
-  $("#policeDays").hidden = !on; $("#policeLegend").hidden = !on;
-  if (!on) { $("#policeLbl").textContent = "Police reports"; return; }
+  $("#policeOpts").hidden = !on; menuState();
+  const days = +($("#policeDays .on") || {dataset: {d: 90}}).dataset.d;
+  if (!on) { $("#policeLbl").textContent = "University Hts, Beachwood, Cleveland Hts"; return; }
   if (!S.police) {
     $("#policeLbl").textContent = "Loading…";
     try { S.police = await getJSON("data/police.json"); } catch { S.police = {reports: []}; }
   }
-  const since = daysAgo(+$("#policeDays").value), base = S.police.base || "";
+  const since = daysAgo(days), base = S.police.base || "";
   const rows = (S.police.reports || []).filter(r => r[1] >= since && inArea(r[0]));
   const rend = L.canvas({padding: .3});
   for (const r of rows) {
@@ -426,7 +442,7 @@ async function renderPolice() {
     m.bindPopup(`<div class="ppop"><b>${esc(what)}</b><br>${cat} · ${fmtDate(r[1])}<br>${esc(title(r[4]))} · ${esc(cityShort(r[0]))}<br>Report ${esc(r[8])}${r[7] ? `<br><a href="${esc(base + r[7])}" target="_blank" rel="noopener">Open the police report (PDF)</a>` : ""}</div>`);
     policeLayer.addLayer(m);
   }
-  $("#policeLbl").textContent = `Police reports (${rows.length})`;
+  $("#policeLbl").textContent = `${rows.length} report${rows.length === 1 ? "" : "s"} in the last ${days === 365 ? "12 months" : days + " days"}${S.area === "ALL" ? "" : " in " + cityShort(S.area)}`;
 }
 
 function renderAll(fit) {
@@ -439,10 +455,7 @@ function renderFoot() {
   const pct = m.parcels ? Math.round(100 * (m.withHistory || 0) / m.parcels) : 0;
   $("#foot").innerHTML = `Updated ${esc(built)} from Cuyahoga County Fiscal Office records (<a href="https://myplace.cuyahogacounty.gov/" target="_blank" rel="noopener">MyPlace</a>). ${(m.parcels || 0).toLocaleString()} parcels tracked${pct < 100 ? `; sale history loaded for ${pct}% so far` : ""}. Not an official record.`;
   if (pct < 100 && m.parcels) {
-    const b = document.createElement("span"); b.className = "pill loading";
-    b.title = "Sale history is still being loaded for the rest of the area; the map fills in as it finishes.";
-    b.textContent = `History ${pct}% loaded`;
-    $(".maptools").appendChild(b);
+    $("#menuStatus").textContent = `Sale history is still loading (${pct}% done); older sales fill in as it finishes.`;
   }
 }
 async function boot() {
@@ -455,12 +468,13 @@ async function boot() {
     if (e.key === "Enter") pickHit(active < 0 ? 0 : active);
     if (e.key === "Escape") $("#results").hidden = true;
   });
-  document.addEventListener("click", e => { if (!e.target.closest(".search")) $("#results").hidden = true; });
-  document.addEventListener("keydown", e => { if (e.key === "Escape") { if ($("#drawer").classList.contains("on")) closeDrawer(); else if (document.body.classList.contains("mapfull")) setFull(false); } });
+  document.addEventListener("click", e => { if (!e.target.closest(".search")) $("#results").hidden = true; if (!e.composedPath().some(n => n.classList && n.classList.contains("menuwrap"))) setMenu(false); });
+  $("#menuBtn").onclick = () => setMenu($("#menu").hidden);
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { if (!$("#menu").hidden) setMenu(false); else if ($("#drawer").classList.contains("on")) closeDrawer(); else if (document.body.classList.contains("mapfull")) setFull(false); } });
   $("#dClose").onclick = closeDrawer;
   $("#policeOn").onchange = renderPolice;
-  $("#policeDays").onchange = renderPolice;
-  $("#nonmarket").onchange = e => { S.nonmarket = e.target.checked; renderMap(false); renderWeek(); };
+  $("#policeDays").querySelectorAll("button").forEach(b => b.onclick = () => { $("#policeDays").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); renderPolice(); });
+  $("#nonmarket").onchange = e => { S.nonmarket = e.target.checked; menuState(); renderMap(false); renderWeek(); };
   $("#hidePublic").onchange = e => { S.hidePublic = e.target.checked; clearOwner(); renderOwners(); };
   $("#ownerMode").querySelectorAll("button").forEach(b => b.onclick = () => { S.ownerMode = b.dataset.k; $("#ownerMode").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); clearOwner(); renderOwners(); });
   const setOwnersOpen = open => { $("#ownersToggle").setAttribute("aria-expanded", open); $("#ownersBody").hidden = !open; if (!open) clearOwner(); store.set("ownersOpen", open); };

@@ -103,7 +103,7 @@ function parcelInfo(f) {
 }
 async function loadParcels() {
   const z = map.getZoom();
-  if (z < PARCEL_ZOOM) { parcelLayer.clearLayers(); labelLayer.clearLayers(); S.parcelBounds = null; return; }
+  if (z < PARCEL_ZOOM) { parcelLayer.clearLayers(); labelLayer.clearLayers(); S.parcelBounds = null; S.labelSpots = []; placePoliceDots(); return; }
   const b = map.getBounds().pad(0.15);
   if (S.parcelBounds && S.parcelBounds.contains(map.getBounds())) {
     if (S.parcelLabels !== (z >= LABEL_ZOOM) || z >= LABEL_ZOOM) { S.parcelLabels = z >= LABEL_ZOOM; drawParcels(S.lastFeats); }
@@ -150,7 +150,7 @@ function drawParcels(feats) {
   parcelRenderer = parcelRenderer || L.canvas({pane: "parcels", padding: .3, tolerance: 3});
   parcelLayer.clearLayers(); labelLayer.clearLayers();
   const showLabels = map.getZoom() >= LABEL_ZOOM, view = map.getBounds();
-  let labels = 0; const placed = [];
+  let labels = 0; const placed = []; S.labelSpots = [];
   L.geoJSON({type: "FeatureCollection", features: feats}, {
     renderer: parcelRenderer, pane: "parcels",
     style: f => pStyle(parcelInfo(f).pin),
@@ -166,12 +166,14 @@ function drawParcels(feats) {
         const lab = fitLabel(lyr, ltxt, view);
         if (lab && !placed.some(q => lab.box[0] < q[2] && lab.box[2] > q[0] && lab.box[1] < q[3] && lab.box[3] > q[1])) {
           labels++; placed.push(lab.box);
+          S.labelSpots.push({cx: (lab.box[0] + lab.box[2]) / 2, cy: (lab.box[1] + lab.box[3]) / 2, deg: lab.deg, w: lab.txt.length * CHAR_W + 8});
           labelLayer.addLayer(L.marker(lab.at, {interactive: false, keyboard: false,
             icon: L.divIcon({className: "plabel", iconSize: null,
               html: `<span style="transform:translate(-50%,-50%) rotate(${lab.deg}deg)">${esc(lab.txt)}</span>`})}));
         }
       }
     }}).eachLayer(l => parcelLayer.addLayer(l));
+  placePoliceDots();
 }
 /* What each lot says when zoomed in: owner, address, last market sale, or nothing (menu > Lot labels). */
 S.labelMode = store.get("labelMode", "name");
@@ -504,12 +506,35 @@ async function renderPolice() {
   for (const r of rows) {
     const [cat, col] = policeCat(r[3], r[2]);
     const what = r[3] ? title(r[3]) : (r[2] === "A" ? "Traffic crash" : "Incident (details not read yet)");
-    const m = L.circleMarker([r[5], r[6]], {renderer: rend, pane: "police", radius: 5.5, color: "#fff", weight: 1.2, fillColor: col, fillOpacity: .9});
+    const m = L.circleMarker([r[5], r[6]], {base: [r[5], r[6]], renderer: rend, pane: "police", radius: 5.5, color: "#fff", weight: 1.2, fillColor: col, fillOpacity: .9});
     m.bindTooltip(`<b>${esc(what)}</b><br>${fmtDate(r[1])} · ${esc(title(r[4].replace(/^(\d+),(.*)$/, "$1 $2").replace(/^([^,\d][^,]*),(\d+)$/, "$2 $1")))}`, {direction: "top"});
     m.bindPopup(`<div class="ppop"><b>${esc(what)}</b><br>${cat} · ${fmtDate(r[1])}<br>${esc(title(r[4]))} · ${esc(cityShort(r[0]))}<br>Report ${esc(r[8])}${r[7] ? `<br><a href="${esc(base + r[7])}" target="_blank" rel="noopener">Open the police report (PDF)</a>` : ""}</div>`);
     policeLayer.addLayer(m);
   }
+  placePoliceDots();
   $("#policeLbl").textContent = `${rows.length}${rows.length < all.length ? " of " + all.length : ""} report${all.length === 1 ? "" : "s"} in the last ${days === 365 ? "12 months" : days + " days"}${S.area === "ALL" ? "" : " in " + cityShort(S.area)}`;
+}
+
+/* Keep report dots clear of the lot labels (nudged to the side of the label), and fan out reports at the same address. */
+function placePoliceDots() {
+  if (!policeLayer) return;
+  const z = map.getZoom(), groups = new Map(), GAP = LABEL_H / 2 + 8;
+  policeLayer.eachLayer(m => { const k = m.options.base.join(); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); });
+  for (const ms of groups.values()) {
+    const b = ms[0].options.base;
+    if (z < 17) { ms.forEach(m => m.setLatLng(b)); continue; }
+    let p = map.latLngToContainerPoint(b), ux = 1, uy = 0;
+    for (const l of S.labelSpots || []) {
+      const a = l.deg * Math.PI / 180, lx = Math.cos(a), ly = Math.sin(a);
+      const du = (p.x - l.cx) * lx + (p.y - l.cy) * ly, dv = -(p.x - l.cx) * ly + (p.y - l.cy) * lx;
+      if (Math.abs(du) < l.w / 2 + 8 && Math.abs(dv) < GAP) {
+        const v = (dv < 0 ? -1 : 1) * GAP;
+        p = L.point(l.cx + du * lx - v * ly, l.cy + du * ly + v * lx);
+        ux = lx; uy = ly; break;
+      }
+    }
+    ms.forEach((m, i) => { const o = (i - (ms.length - 1) / 2) * 12; m.setLatLng(map.containerPointToLatLng([p.x + ux * o, p.y + uy * o])); });
+  }
 }
 
 function renderAll(fit) {

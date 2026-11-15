@@ -1,0 +1,277 @@
+"use strict";
+/* Deedwatch front end: reads static JSON built nightly by the GitHub Action. */
+const AREAS = [
+  ["ALL", "UH & neighbors"], ["UNIVERSITY HEIGHTS", "University Hts"], ["SOUTH EUCLID", "South Euclid"],
+  ["CLEVELAND HEIGHTS", "Cleveland Hts"], ["SHAKER HEIGHTS", "Shaker Hts"], ["BEACHWOOD", "Beachwood"], ["LYNDHURST", "Lyndhurst"]];
+const UH = [41.4975, -81.5375];
+const MAP_DAYS = 60, WEEK_DAYS = 7;
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const money = v => v ? "$" + Math.round(v).toLocaleString("en-US") : "—";
+const moneyS = v => { if (!v) return "—"; if (v >= 1e6) return "$" + (v / 1e6).toFixed(v >= 1e7 ? 1 : 2) + "M"; if (v >= 1e3) return "$" + Math.round(v / 1e3) + "K"; return "$" + v; };
+const fmtPin = p => p && p.length === 8 ? `${p.slice(0, 3)}-${p.slice(3, 5)}-${p.slice(5)}` : p;
+const title = s => String(s || "").toLowerCase().replace(/\b([a-z])/g, m => m.toUpperCase()).replace(/\b(Llc|Lp|Inc|Ii|Iii|Usa|Us|Na)\b/g, m => m.toUpperCase());
+const cityShort = c => (AREAS.find(a => a[0] === c) || [c, title(c)])[1];
+const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
+const daysAgo = n => { const d = new Date(todayISO() + "T12:00:00"); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+const fmtDate = iso => { if (!iso) return ""; const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", {month: "short", day: "numeric", year: "numeric"}); };
+const store = { get(k, d) { try { const v = localStorage.getItem("dw:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+                set(k, v) { try { localStorage.setItem("dw:" + k, JSON.stringify(v)); } catch {} } };
+
+const S = { area: store.get("area", "ALL"), kind: "res", nonmarket: false, hidePublic: true,
+  meta: null, recent: [], changes: [], prices: {}, owners: {}, index: null, indexP: null, hist: {}, markers: new Map(), ownerLayer: null, sel: null };
+
+async function getJSON(path) { const r = await fetch(path, {cache: "no-cache"}); if (!r.ok) throw new Error(path + " " + r.status); return r.json(); }
+
+/* ---------------- map ---------------- */
+let map, saleLayer;
+function houseIcon(market, recentWeek) {
+  const fill = market ? (recentWeek ? "#c2410c" : "#1f5f4a") : "#9a958a";
+  const size = market ? 22 : 17;
+  return L.divIcon({className: "house", iconSize: [size, size], iconAnchor: [size / 2, size - 2],
+    html: `<svg width="${size}" height="${size}" viewBox="0 0 24 24"><path d="M12 2.5 1.8 11.3h3v9.7h5.6v-6h3.2v6h5.6v-9.7h3z" fill="${fill}" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>`});
+}
+function initMap() {
+  map = L.map("map", {zoomControl: false}).setView(UH, 14);
+  L.control.zoom({position: "bottomright"}).addTo(map);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+    maxZoom: 20, subdomains: "abcd",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'}).addTo(map);
+  saleLayer = L.layerGroup().addTo(map);
+}
+function inArea(c) { return S.area === "ALL" || c === S.area; }
+function renderMap(fit) {
+  saleLayer.clearLayers(); S.markers.clear();
+  const since = daysAgo(MAP_DAYS), week = daysAgo(WEEK_DAYS);
+  const seen = new Set();
+  const rows = S.recent.filter(r => r.d >= since && inArea(r.c) && (r.m || S.nonmarket) && r.lat);
+  let n = 0;
+  for (const r of rows) {
+    if (seen.has(r.pin)) continue; seen.add(r.pin); n++;
+    const mk = L.marker([r.lat, r.lng], {icon: houseIcon(r.m, r.d >= week), riseOnHover: true, zIndexOffset: r.m ? 100 : 0});
+    mk.bindTooltip(`<b>${esc(title(r.a))}</b><br>${r.p ? money(r.p) : "No sale price"} · ${fmtDate(r.d)}`, {direction: "top", offset: [0, -14]});
+    mk.on("click", () => openParcel(r.pin, r));
+    mk.addTo(saleLayer); S.markers.set(r.pin, mk);
+  }
+  $("#mapcount").textContent = `${n} ${S.nonmarket ? "transfers" : "sales"} in the last ${MAP_DAYS} days`;
+  if (fit && rows.length && S.area !== "ALL") map.fitBounds(L.latLngBounds(rows.map(r => [r.lat, r.lng])).pad(0.1), {maxZoom: 15});
+  if (fit && S.area === "ALL") map.setView(UH, 14);
+}
+
+/* ---------------- this week ---------------- */
+function renderWeek() {
+  const since = daysAgo(WEEK_DAYS);
+  const rows = S.changes.filter(c => c.d >= since && inArea(c.c));
+  $("#weekSub").textContent = rows.length ? `${rows.length} change${rows.length === 1 ? "" : "s"} since ${fmtDate(since)}` : "";
+  if (!rows.length) { $("#week").innerHTML = `<li class="none" style="cursor:default">No recorded sales or owner changes in the last 7 days${S.area === "ALL" ? "" : " in " + cityShort(S.area)}.</li>`; return; }
+  $("#week").innerHTML = rows.slice(0, 60).map((c, i) => {
+    const [y, m, d] = c.d.split("-").map(Number); const dt = new Date(y, m - 1, d);
+    const tag = c.kind === "sale" ? '<span class="tag">Sold</span>' : c.kind === "owner" ? '<span class="tag o">New owner</span>' : `<span class="tag g">${esc(shortDeed(c.t) || "Transfer")}</span>`;
+    return `<li data-i="${i}"><div class="dt">${dt.toLocaleDateString("en-US", {month: "short"})}<b>${d}</b></div>
+      <div class="main"><div class="addr">${tag}${esc(title(c.a) || fmtPin(c.pin))}</div>
+      <div class="who">${c.to ? "To " + esc(title(c.to)) : ""}${c.from ? " · from " + esc(title(c.from)) : ""}</div></div>
+      <div class="amt">${c.kind === "sale" ? moneyS(c.p) : ""}</div></li>`;
+  }).join("");
+  $("#week").querySelectorAll("li[data-i]").forEach(li => li.onclick = () => { const c = rows[+li.dataset.i]; openParcel(c.pin, c, true); });
+}
+const shortDeed = t => String(t || "").replace(/ Deed$/i, "").replace(/Quit Claim/i, "Quit claim").replace(/Sheriffs?/i, "Sheriff");
+
+/* ---------------- prices ---------------- */
+function renderPrices() {
+  const area = S.prices[S.area] || {};
+  const months = S.kind === "res" ? (area.res || []) : mergeMonths(area.res || [], area.other || []);
+  // 60-day tiles straight from transfers so they match the map
+  const since = daysAgo(MAP_DAYS), deals = new Set();
+  const sales = S.recent.filter(r => r.m && r.d >= since && inArea(r.c) && (S.kind === "all" || r.cls === "R"))
+    .filter(r => { const k = r.d + "|" + r.p + "|" + r.buyer; if (deals.has(k)) return false; deals.add(k); return true; });
+  const sorted = [...sales].sort((a, b) => a.p - b.p);
+  const med = sorted.length ? (sorted.length % 2 ? sorted[sorted.length >> 1].p : (sorted[sorted.length / 2 - 1].p + sorted[sorted.length / 2].p) / 2) : 0;
+  const hi = sorted[sorted.length - 1], lo = sorted[0];
+  $("#priceTiles").innerHTML = `
+    <div class="tile" ${hi ? `data-pin="${hi.pin}"` : ""}><div class="k">Highest</div><div class="v">${moneyS(hi && hi.p)}</div><div class="s">${hi ? esc(title(hi.a)) : "&nbsp;"}</div></div>
+    <div class="tile"><div class="k">Median</div><div class="v">${moneyS(med)}</div><div class="s">${sales.length} sale${sales.length === 1 ? "" : "s"}, last ${MAP_DAYS} days</div></div>
+    <div class="tile" ${lo ? `data-pin="${lo.pin}"` : ""}><div class="k">Lowest</div><div class="v">${moneyS(lo && lo.p)}</div><div class="s">${lo ? esc(title(lo.a)) : "&nbsp;"}</div></div>`;
+  $("#priceTiles").querySelectorAll("[data-pin]").forEach(t => t.onclick = () => { const r = S.recent.find(x => x.pin === t.dataset.pin); openParcel(t.dataset.pin, r, true); });
+  renderChart(months.slice(-12));
+}
+function mergeMonths(a, b) {
+  const m = new Map();
+  for (const x of [...a, ...b]) {
+    const g = m.get(x.m) || {m: x.m, n: 0, hi: 0, lo: Infinity, meds: []};
+    g.n += x.n; g.hi = Math.max(g.hi, x.hi); g.lo = Math.min(g.lo, x.lo); g.meds.push([x.med, x.n]); m.set(x.m, g);
+  }
+  return [...m.values()].sort((x, y) => x.m < y.m ? -1 : 1).map(g => ({...g, med: g.meds.reduce((s, [v, n]) => s + v * n, 0) / g.n}));
+}
+function renderChart(ms) {
+  const el = $("#priceChart");
+  if (ms.length < 2) { el.innerHTML = `<p class="none">Not enough sales yet for a monthly trend.</p>`; return; }
+  const W = 360, H = 150, P = {l: 44, r: 8, t: 8, b: 20};
+  const max = Math.max(...ms.map(m => m.hi)) * 1.05, min = 0;
+  const x = i => P.l + i * (W - P.l - P.r) / (ms.length - 1);
+  const y = v => P.t + (H - P.t - P.b) * (1 - (v - min) / (max - min));
+  const band = ms.map((m, i) => `${x(i)},${y(m.hi)}`).join(" ") + " " + ms.map((m, i) => `${x(i)},${y(m.lo)}`).reverse().join(" ");
+  const line = ms.map((m, i) => `${i ? "L" : "M"}${x(i)},${y(m.med)}`).join("");
+  const ticks = [0, .5, 1].map(f => min + f * (max - min));
+  const lab = m => new Date(m + "-15").toLocaleDateString("en-US", {month: "short"});
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Monthly median sale price with high and low range">
+    ${ticks.map(t => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(t)}" y2="${y(t)}" stroke="#ece7dc"/><text class="lbl" x="${P.l - 6}" y="${y(t) + 3}" text-anchor="end">${moneyS(t) === "—" ? "$0" : moneyS(t)}</text>`).join("")}
+    <polygon points="${band}" fill="#1f5f4a" opacity=".12"/>
+    <path d="${line}" fill="none" stroke="#1f5f4a" stroke-width="2.2" stroke-linejoin="round"/>
+    ${ms.map((m, i) => `<circle cx="${x(i)}" cy="${y(m.med)}" r="3" fill="#fff" stroke="#1f5f4a" stroke-width="1.6"><title>${lab(m.m)} ${m.m.slice(0, 4)}: median ${money(m.med)}, high ${money(m.hi)}, low ${money(m.lo)} (${m.n} sales)</title></circle>`).join("")}
+    ${ms.map((m, i) => (i % 2 === (ms.length - 1) % 2) ? `<text class="lbl" x="${x(i)}" y="${H - 5}" text-anchor="middle">${lab(m.m)}</text>` : "").join("")}
+  </svg><div class="legend"><span><i style="background:#1f5f4a"></i>Median</span><span><i style="background:#1f5f4a;opacity:.25;height:8px"></i>High–low range</span></div>`;
+}
+
+/* ---------------- owners ---------------- */
+function renderOwners() {
+  const rows = (S.owners[S.area] || []).filter(o => !(S.hidePublic && o.pub)).slice(0, 12);
+  if (!rows.length) { $("#owners").innerHTML = `<p class="none">No owner data yet.</p>`; return; }
+  const max = rows[0].n;
+  $("#owners").innerHTML = rows.map((o, i) => `<div class="row ${o.pub ? "pub" : ""}" data-i="${i}" title="${esc(o.name)}${o.variants > 1 ? ` (${o.variants} name variants)` : ""}">
+    <div class="nm">${esc(title(o.name))}</div><div class="ct">${o.n}</div>
+    <div class="bar" style="width:${Math.max(3, 100 * o.n / max)}%"></div></div>`).join("") +
+    `<p class="fine">Parcels owned${S.area === "ALL" ? " across the area" : " in " + cityShort(S.area)}. Name variants (LLC, Inc., punctuation) are merged. Tap a name to map its parcels.</p>`;
+  $("#owners").querySelectorAll(".row").forEach(r => r.onclick = () => showOwner(rows[+r.dataset.i], r));
+}
+async function showOwner(o, rowEl) {
+  document.querySelectorAll(".owners .row.on").forEach(x => x.classList.remove("on"));
+  if (S.ownerLayer) { map.removeLayer(S.ownerLayer); S.ownerLayer = null; }
+  if (S.sel === o) { S.sel = null; return; }
+  S.sel = o; rowEl.classList.add("on");
+  await loadIndex();
+  const byPin = S.indexMap;
+  const pts = o.pins.map(p => byPin.get(p)).filter(r => r && r[9]);
+  S.ownerLayer = L.layerGroup(pts.map(r => L.circleMarker([r[9], r[10]], {radius: 6, color: "#fff", weight: 1.5, fillColor: "#7a3fb0", fillOpacity: .9})
+    .bindTooltip(`<b>${esc(title(r[1]))}</b><br>${esc(title(r[3]))}`).on("click", () => openParcel(r[0])))).addTo(map);
+  if (pts.length) map.fitBounds(L.latLngBounds(pts.map(r => [r[9], r[10]])).pad(0.15), {maxZoom: 16});
+}
+
+/* ---------------- search ---------------- */
+async function loadIndex() {
+  if (S.index) return S.index;
+  if (!S.indexP) S.indexP = getJSON("data/index.json").then(ix => {
+    S.index = ix; S.indexMap = new Map(ix.map(r => [r[0], r]));
+    S.hay = ix.map(r => [(r[1] + " " + r[2]).toUpperCase(), (r[3] || "").toUpperCase(), (r[4] || "").toUpperCase()]);
+    return ix; });
+  return S.indexP;
+}
+let qTimer, active = -1, lastHits = [];
+function onSearch() {
+  clearTimeout(qTimer);
+  qTimer = setTimeout(async () => {
+    const q = $("#q").value.trim().toUpperCase();
+    const box = $("#results");
+    if (q.length < 2) { box.hidden = true; return; }
+    if (!S.index) { box.hidden = false; box.innerHTML = `<div class="empty">Loading the parcel index…</div>`; }
+    await loadIndex();
+    const words = q.replace(/[^A-Z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+    const hits = [];
+    for (let i = 0; i < S.index.length && hits.length < 40; i++) {
+      const [addr, own, past] = S.hay[i];
+      const all = addr + " " + own + " " + past;
+      if (!words.every(w => all.includes(w))) continue;
+      const why = words.every(w => (addr + " " + own).includes(w)) ? (words.every(w => addr.includes(w)) ? "addr" : "owner") : "past";
+      hits.push({r: S.index[i], why, score: (why === "addr" ? 0 : why === "owner" ? 1 : 2)});
+    }
+    hits.sort((a, b) => a.score - b.score);
+    lastHits = hits; active = -1;
+    box.hidden = false;
+    if (!hits.length) { box.innerHTML = `<div class="empty">No parcels match “${esc($("#q").value)}”.</div>`; return; }
+    const hl = s => { let h = esc(title(s)); for (const w of words) h = h.replace(new RegExp(`(${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "ig"), "<mark>$1</mark>"); return h; };
+    box.innerHTML = hits.map((h, i) => {
+      const r = h.r;
+      const pastName = h.why === "past" ? (r[4].split("|").find(n => words.some(w => n.toUpperCase().includes(w))) || "") : "";
+      return `<div class="r" data-i="${i}"><div><b>${hl(r[1] || fmtPin(r[0]))}</b> <span class="why">${esc(cityShort(r[2]))}</span></div>
+        <div class="why">${h.why === "past" ? "Past owner: " + hl(pastName) + " · now " + esc(title(r[3])) : "Owner: " + hl(r[3])}</div></div>`;
+    }).join("") + (hits.length >= 40 ? `<div class="empty">Showing the first 40. Add a word to narrow it down.</div>` : "");
+    box.querySelectorAll(".r").forEach(el => el.onclick = () => pickHit(+el.dataset.i));
+  }, 140);
+}
+function pickHit(i) { const h = lastHits[i]; if (!h) return; $("#results").hidden = true; openParcel(h.r[0], null, true); }
+
+/* ---------------- parcel drawer ---------------- */
+async function loadHistory(pin) {
+  const b = pin.slice(0, 3);
+  if (!S.hist[b]) S.hist[b] = getJSON(`data/h/${b}.json`).catch(() => ({}));
+  return (await S.hist[b])[pin] || null;
+}
+async function openParcel(pin, row, pan) {
+  await loadIndex().catch(() => {});
+  const ix = S.indexMap && S.indexMap.get(pin);
+  const a = (ix && ix[1]) || (row && row.a) || fmtPin(pin), city = (ix && ix[2]) || (row && row.c) || "";
+  const lat = (ix && ix[9]) || (row && row.lat), lng = (ix && ix[10]) || (row && row.lng);
+  $("#dTitle").textContent = title(a);
+  $("#dSub").innerHTML = `${esc(cityShort(city))} · Parcel ${esc(fmtPin(pin))}`;
+  $("#dBody").innerHTML = `<p class="none">Loading history…</p>`;
+  $("#drawer").classList.add("on"); $("#drawer").setAttribute("aria-hidden", "false");
+  if (lat && pan) map.setView([lat, lng], Math.max(map.getZoom(), 16));
+  document.querySelectorAll(".house.sel").forEach(x => x.classList.remove("sel"));
+  const mk = S.markers.get(pin); if (mk && mk._icon) mk._icon.classList.add("sel");
+  const hist = await loadHistory(pin);
+  const kv = pairs => `<dl class="kv">${pairs.filter(p => p[1]).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
+  const owner = (ix && ix[3]) || "";
+  const histHtml = hist == null ? `<p class="none">Sale history for this parcel hasn't been loaded yet. The nightly job is still working through the area.</p>`
+    : !hist.length ? `<p class="none">No recorded transfers.</p>`
+    : `<ul class="hist">${hist.map(t => { const market = t.p >= 10000 && t.n === 1 && !/quit|sheriff/i.test(t.t);
+        return `<li class="${market ? "" : "g"}"><div class="h1"><span>${fmtDate(t.d)}</span><span>${t.p ? money(t.p) : "$0"}</span></div>
+        <div class="h2">${esc(t.t || "Transfer")}${t.n > 1 ? ` · ${t.n} parcels in one sale` : ""}</div>
+        <div class="h2">To ${esc((t.ge || []).map(title).join(", ") || "—")}${t.gr && t.gr.length ? ` · from ${esc(t.gr.map(title).join(", "))}` : ""}</div></li>`; }).join("")}</ul>`;
+  $("#dBody").innerHTML = kv([
+    ["Owner", owner ? `<b>${esc(title(owner))}</b>` : ""],
+    ["Land use", ix && ix[6] ? esc(title(ix[6])) : ""],
+    ["Living area", ix && ix[8] ? Math.round(ix[8]).toLocaleString() + " sq ft" : ""],
+    ["County value", ix && ix[7] ? money(ix[7]) : ""]]) +
+    `<div style="display:flex;gap:8px;flex-wrap:wrap">${owner ? `<button class="btn" id="dOwn">Other parcels of this owner</button>` : ""}
+      <a class="btn" href="https://myplace.cuyahogacounty.gov/" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">Open MyPlace</a></div>
+     <div class="sect">Sale &amp; transfer history</div>${histHtml}
+     <p class="fine">Source: Cuyahoga County Fiscal Office (MyPlace). County data is provided “as is” and is not the official record. On MyPlace, search parcel ${esc(fmtPin(pin))}.</p>`;
+  if ($("#dOwn")) $("#dOwn").onclick = () => { $("#q").value = owner; closeDrawer(); onSearch(); $("#q").focus(); };
+}
+function closeDrawer() { $("#drawer").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true"); document.querySelectorAll(".house.sel").forEach(x => x.classList.remove("sel")); }
+
+/* ---------------- wiring ---------------- */
+function renderAreas() {
+  $("#areas").innerHTML = AREAS.map(([k, n]) => `<button role="tab" data-a="${k}" class="${k === S.area ? "on" : ""}">${n}</button>`).join("");
+  $("#areas").querySelectorAll("button").forEach(b => b.onclick = () => { S.area = b.dataset.a; store.set("area", S.area); renderAreas(); renderAll(true); });
+}
+function renderAll(fit) {
+  if (S.ownerLayer) { map.removeLayer(S.ownerLayer); S.ownerLayer = null; S.sel = null; }
+  renderMap(fit); renderWeek(); renderPrices(); renderOwners();
+}
+function renderFoot() {
+  const m = S.meta || {};
+  const built = m.built ? new Date(m.built).toLocaleString("en-US", {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"}) : "—";
+  const pct = m.parcels ? Math.round(100 * (m.withHistory || 0) / m.parcels) : 0;
+  $("#foot").innerHTML = `Updated ${esc(built)} from Cuyahoga County Fiscal Office records (<a href="https://myplace.cuyahogacounty.gov/" target="_blank" rel="noopener">MyPlace</a>). ${(m.parcels || 0).toLocaleString()} parcels tracked${pct < 100 ? `; sale history loaded for ${pct}% so far` : ""}. Not an official record.`;
+  if (pct < 95 && m.parcels) {
+    const b = document.createElement("div"); b.className = "banner";
+    b.textContent = `Still loading sale history: ${pct}% of parcels done. The map fills in as the nightly job works through the area.`;
+    $(".mapcol").appendChild(b);
+  }
+}
+async function boot() {
+  initMap(); renderAreas();
+  $("#q").addEventListener("input", onSearch);
+  $("#q").addEventListener("focus", () => { loadIndex(); if (lastHits.length && $("#q").value.trim().length >= 2) $("#results").hidden = false; });
+  $("#q").addEventListener("keydown", e => {
+    const items = [...document.querySelectorAll("#results .r")];
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); active = Math.max(0, Math.min(items.length - 1, active + (e.key === "ArrowDown" ? 1 : -1))); items.forEach((x, i) => x.classList.toggle("on", i === active)); items[active] && items[active].scrollIntoView({block: "nearest"}); }
+    if (e.key === "Enter") pickHit(active < 0 ? 0 : active);
+    if (e.key === "Escape") $("#results").hidden = true;
+  });
+  document.addEventListener("click", e => { if (!e.target.closest(".search")) $("#results").hidden = true; });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+  $("#dClose").onclick = closeDrawer;
+  $("#nonmarket").onchange = e => { S.nonmarket = e.target.checked; renderMap(false); };
+  $("#hidePublic").onchange = e => { S.hidePublic = e.target.checked; renderOwners(); };
+  $("#priceKind").querySelectorAll("button").forEach(b => b.onclick = () => { S.kind = b.dataset.k; $("#priceKind").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); renderPrices(); });
+  try {
+    [S.meta, S.recent, S.changes, S.prices, S.owners] = await Promise.all(["meta", "recent", "changes", "prices", "owners"].map(n => getJSON(`data/${n}.json`)));
+  } catch (e) {
+    $("#week").innerHTML = `<li class="none">Couldn't load data (${esc(e.message)}). The first nightly update may not have finished yet.</li>`;
+    return;
+  }
+  renderAll(true); renderFoot();
+}
+boot();

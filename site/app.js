@@ -118,6 +118,34 @@ async function loadParcels() {
     drawParcels(feats);
   } catch (e) { if (e.name !== "AbortError") console.warn("parcels", e); }
 }
+function pStyle(pin) {
+  return pin && pin === S.focusPin ? {color: "#d9480f", weight: 3, opacity: 1, fillColor: "#fd7e14", fillOpacity: .22}
+    : {color: "#5b4a8a", weight: 1, opacity: .75, fillColor: "#7a3fb0", fillOpacity: .04};
+}
+/* The house you searched for or opened: an orange pin + outline that stays after the detail panel closes. */
+function setFocus(pin, lat, lng, label, row) {
+  S.focusPin = pin;
+  if (S.focusMk) S.focusMk.remove();
+  if (!lat) return;
+  S.focusMk = L.marker([lat, lng], {zIndexOffset: 1000, title: label || "",
+    icon: L.divIcon({className: "focuspin", iconSize: [30, 40], iconAnchor: [15, 38],
+      html: '<span class="ring"></span><svg viewBox="0 0 30 40" width="30" height="40"><path d="M15 39s12-13.5 12-23A12 12 0 0 0 3 16c0 9.5 12 23 12 23z" fill="#e8590c" stroke="#fff" stroke-width="2"/><circle cx="15" cy="15.5" r="4.5" fill="#fff"/></svg>'})})
+    .bindTooltip(`<b>${esc(title(label || ""))}</b><br><span class="tt-d">Tap for details</span>`, {direction: "top", offset: [0, -34]})
+    .on("click", () => openParcel(pin, row))
+    .addTo(map);
+  if (S.lastFeats && map.getZoom() >= PARCEL_ZOOM) drawParcels(S.lastFeats);
+}
+async function focusParcel(pin, row) {
+  await loadIndex().catch(() => {});
+  const ix = S.indexMap && S.indexMap.get(pin);
+  const lat = (ix && ix[9]) || (row && row.lat), lng = (ix && ix[10]) || (row && row.lng);
+  const a = (ix && ix[1]) || (row && row.a) || fmtPin(pin);
+  if (!lat) return openParcel(pin, row);
+  closeDrawer();
+  map.setView([lat, lng], Math.max(map.getZoom(), LABEL_ZOOM), {animate: true});
+  setFocus(pin, lat, lng, a, row);
+  setTimeout(() => S.focusMk && S.focusMk.openTooltip(), 400);
+}
 function drawParcels(feats) {
   parcelRenderer = parcelRenderer || L.canvas({pane: "parcels", padding: .3, tolerance: 3});
   parcelLayer.clearLayers(); labelLayer.clearLayers();
@@ -125,12 +153,13 @@ function drawParcels(feats) {
   let labels = 0; const placed = [];
   L.geoJSON({type: "FeatureCollection", features: feats}, {
     renderer: parcelRenderer, pane: "parcels",
-    style: {color: "#5b4a8a", weight: 1, opacity: .75, fillColor: "#7a3fb0", fillOpacity: .04},
+    style: f => pStyle(parcelInfo(f).pin),
     onEachFeature: (f, lyr) => {
       const info = parcelInfo(f);
+      if (info.pin === S.focusPin) S.focusLyr = lyr;
       lyr.bindTooltip(`<b>${esc(title(info.addr) || fmtPin(info.pin))}</b><br>${esc(title(info.owner))}`, {sticky: true});
       lyr.on("mouseover", () => lyr.setStyle({fillOpacity: .22, weight: 2}));
-      lyr.on("mouseout", () => lyr.setStyle({fillOpacity: .04, weight: 1}));
+      lyr.on("mouseout", () => lyr.setStyle(pStyle(info.pin)));
       lyr.on("click", () => openParcel(info.pin, {a: info.addr, c: info.city, owner: info.owner}));
       if (showLabels && labels < 600 && info.owner) {
         const lab = fitLabel(lyr, info.owner, view);
@@ -355,7 +384,11 @@ function onSearch() {
     box.querySelectorAll(".r").forEach(el => el.onclick = () => pickHit(+el.dataset.i));
   }, 140);
 }
-function pickHit(i) { const h = lastHits[i]; if (!h) return; $("#results").hidden = true; openParcel(h.r[0], null, true); }
+function pickHit(i) {
+  const h = lastHits[i]; if (!h) return; $("#results").hidden = true; $("#q").blur();
+  if (window.innerWidth <= 900) $(".mapcol").scrollIntoView({behavior: "smooth"});
+  focusParcel(h.r[0]);
+}
 
 /* ---------------- parcel drawer ---------------- */
 async function loadHistory(pin) {
@@ -373,6 +406,7 @@ async function openParcel(pin, row, pan) {
   $("#dBody").innerHTML = `<p class="none">Loading history…</p>`;
   $("#drawer").classList.add("on"); $("#drawer").setAttribute("aria-hidden", "false");
   if (lat && pan) map.setView([lat, lng], Math.max(map.getZoom(), 16));
+  if (lat && S.focusPin !== pin) setFocus(pin, lat, lng, a, row);
   document.querySelectorAll(".house.sel").forEach(x => x.classList.remove("sel"));
   const mk = S.markers.get(pin); if (mk && mk._icon) mk._icon.classList.add("sel");
   const hist = await loadHistory(pin);
@@ -389,10 +423,11 @@ async function openParcel(pin, row, pan) {
     ["Land use", ix && ix[6] ? esc(title(ix[6])) : ""],
     ["Living area", ix && ix[8] ? Math.round(ix[8]).toLocaleString() + " sq ft" : ""],
     ["County value", ix && ix[7] ? money(ix[7]) : ""]]) +
-    `<div style="display:flex;gap:8px;flex-wrap:wrap">${owner ? `<button class="btn" id="dOwn">Other parcels of this owner</button>` : ""}
+    `<div style="display:flex;gap:8px;flex-wrap:wrap">${lat ? `<button class="btn primary" id="dMap">Show on map</button>` : ""}${owner ? `<button class="btn" id="dOwn">Other parcels of this owner</button>` : ""}
       <a class="btn" href="https://myplace.cuyahogacounty.gov/" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">Open MyPlace</a></div>
      <div class="sect">Sale &amp; transfer history</div>${histHtml}
      <p class="fine">Source: Cuyahoga County Fiscal Office (MyPlace). County data is provided “as is” and is not the official record. On MyPlace, search parcel ${esc(fmtPin(pin))}.</p>`;
+  if ($("#dMap")) $("#dMap").onclick = () => { closeDrawer(); if (document.body.classList.contains("mapfull") === false && window.innerWidth <= 900) $(".mapcol").scrollIntoView({behavior: "smooth"}); map.setView([lat, lng], Math.max(map.getZoom(), LABEL_ZOOM)); setTimeout(() => S.focusMk && S.focusMk.openTooltip(), 400); };
   if ($("#dOwn")) $("#dOwn").onclick = () => { $("#q").value = owner; closeDrawer(); onSearch(); $("#q").focus(); };
 }
 function closeDrawer() { $("#drawer").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true"); document.querySelectorAll(".house.sel").forEach(x => x.classList.remove("sel")); }
@@ -415,7 +450,7 @@ function renderAreas() {
 /* ---------------- police reports ---------------- */
 let policeLayer, policeRend;
 const POL_CATS = [["Violent", "#c53030"], ["Property", "#c47f00"], ["Traffic", "#2b6cb0"], ["Other", "#718096"]];
-S.polHide = new Set(store.get("polHide", []));
+S.polSel = new Set(store.get("polSel", []));  // empty = every type
 function policeCat(off, t) {
   const o = String(off || "").toUpperCase();
   if (t === "A" || /OVI|TRAFFIC|ACCIDENT|CRASH|DRIV|LICENSE|HIT-SKIP|PARKING/.test(o)) return ["Traffic", "#2b6cb0"];
@@ -439,12 +474,15 @@ async function renderPolice() {
   const all = (S.police.reports || []).filter(r => r[1] >= since && inArea(r[0]));
   const counts = {};
   for (const r of all) { const c = policeCat(r[3], r[2])[0]; counts[c] = (counts[c] || 0) + 1; }
-  $("#polCats").innerHTML = POL_CATS.map(([c, col]) => `<button data-c="${c}" class="${S.polHide.has(c) ? "off" : ""}" aria-pressed="${!S.polHide.has(c)}"><i style="background:${col}"></i>${c} <span>${counts[c] || 0}</span></button>`).join("");
-  $("#polCats").querySelectorAll("button").forEach(b => b.onclick = () => {
-    const c = b.dataset.c; S.polHide.has(c) ? S.polHide.delete(c) : S.polHide.add(c);
-    store.set("polHide", [...S.polHide]); renderPolice();
+  const shown = c => !S.polSel.size || S.polSel.has(c);
+  $("#polCats").innerHTML = POL_CATS.map(([c, col]) => `<button data-c="${c}" class="${shown(c) ? "" : "off"} ${S.polSel.has(c) ? "sel" : ""}" aria-pressed="${S.polSel.has(c)}"><i style="background:${col}"></i>${c} <span>${counts[c] || 0}</span></button>`).join("") +
+    (S.polSel.size ? `<button class="all" id="polAll">Show all types</button>` : "");
+  $("#polCats").querySelectorAll("button[data-c]").forEach(b => b.onclick = () => {
+    const c = b.dataset.c; S.polSel.has(c) ? S.polSel.delete(c) : S.polSel.add(c);
+    store.set("polSel", [...S.polSel]); renderPolice();
   });
-  const rows = all.filter(r => !S.polHide.has(policeCat(r[3], r[2])[0]));
+  if ($("#polAll")) $("#polAll").onclick = () => { S.polSel.clear(); store.set("polSel", []); renderPolice(); };
+  const rows = all.filter(r => shown(policeCat(r[3], r[2])[0]));
   const rend = policeRend;
   for (const r of rows) {
     const [cat, col] = policeCat(r[3], r[2]);

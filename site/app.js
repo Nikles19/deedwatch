@@ -55,6 +55,18 @@ function initMap() {
   labelLayer = L.layerGroup().addTo(map);
   saleLayer = L.layerGroup().addTo(map);
   map.on("moveend", () => { clearTimeout(parcelTimer); parcelTimer = setTimeout(loadParcels, 250); });
+  const Full = L.Control.extend({options: {position: "bottomright"}, onAdd() {
+    const b = L.DomUtil.create("button", "leaflet-bar fullbtn");
+    b.type = "button"; b.title = "Full-screen map"; b.setAttribute("aria-label", "Full-screen map");
+    b.innerHTML = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path class="o" d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4"/><path class="c" d="M7 3v4H3M13 7h4M13 3v4M17 13h-4v4M7 17v-4H3"/></svg>';
+    L.DomEvent.disableClickPropagation(b);
+    b.onclick = () => setFull(!document.body.classList.contains("mapfull"));
+    return b; }});
+  map.addControl(new Full());
+}
+function setFull(on) {
+  document.body.classList.toggle("mapfull", on);
+  setTimeout(() => { map.invalidateSize(); loadParcels(); }, 60);
 }
 
 /* ---------------- every parcel, once zoomed in ---------------- */
@@ -115,7 +127,7 @@ function drawParcels(feats) {
       if (showLabels && labels < 500 && info.owner) {
         const c = lyr.getBounds().getCenter();
         const txt = shortOwner(info.owner), pt = map.latLngToContainerPoint(c);
-        const w = txt.length * 5.8 + 6, box = [pt.x - w / 2, pt.y - 8, pt.x + w / 2, pt.y + 8];
+        const w = txt.length * 5.8 + 16, box = [pt.x - w / 2, pt.y - 10, pt.x + w / 2, pt.y + 10];
         const free = view.contains(c) && !placed.some(q => box[0] < q[2] && box[2] > q[0] && box[1] < q[3] && box[3] > q[1]);
         if (free) { labels++; placed.push(box);
           labelLayer.addLayer(L.marker(c, {interactive: false, keyboard: false,
@@ -381,7 +393,7 @@ async function boot() {
     if (e.key === "Escape") $("#results").hidden = true;
   });
   document.addEventListener("click", e => { if (!e.target.closest(".search")) $("#results").hidden = true; });
-  document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { if ($("#drawer").classList.contains("on")) closeDrawer(); else if (document.body.classList.contains("mapfull")) setFull(false); } });
   $("#dClose").onclick = closeDrawer;
   $("#nonmarket").onchange = e => { S.nonmarket = e.target.checked; renderMap(false); renderWeek(); };
   $("#hidePublic").onchange = e => { S.hidePublic = e.target.checked; clearOwner(); renderOwners(); };

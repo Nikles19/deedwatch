@@ -416,6 +416,11 @@ async function loadHistory(pin) {
   if (!S.hist[b]) S.hist[b] = getJSON(`data/h/${b}.json`).catch(() => ({}));
   return (await S.hist[b])[pin] || null;
 }
+/* Zillow's address search; on a phone with the Zillow app this opens the app. */
+function zillowUrl(addr, city) {
+  const q = `${title(addr).replace(/\s*#\s*/, " Unit ").trim()}, ${title(city)}, OH`;
+  return "https://www.zillow.com/homes/" + encodeURIComponent(q.replace(/\s+/g, "-")).replace(/%2C/g, ",") + "_rb/";
+}
 async function openParcel(pin, row, pan) {
   await loadIndex().catch(() => {});
   const ix = S.indexMap && S.indexMap.get(pin);
@@ -443,6 +448,7 @@ async function openParcel(pin, row, pan) {
     ["Living area", ix && ix[8] ? Math.round(ix[8]).toLocaleString() + " sq ft" : ""],
     ["County value", ix && ix[7] ? money(ix[7]) : ""]]) +
     `<div style="display:flex;gap:8px;flex-wrap:wrap">${lat ? `<button class="btn primary" id="dMap">Show on map</button>` : ""}${owner ? `<button class="btn" id="dOwn">Other parcels of this owner</button>` : ""}
+      ${/^\d/.test(a) ? `<a class="btn" href="${esc(zillowUrl(a, city))}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">Open in Zillow</a>` : ""}
       <a class="btn" href="https://myplace.cuyahogacounty.gov/" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">Open MyPlace</a></div>
      <div class="sect">Sale &amp; transfer history</div>${histHtml}
      <p class="fine">Source: Cuyahoga County Fiscal Office (MyPlace). County data is provided “as is” and is not the official record. On MyPlace, search parcel ${esc(fmtPin(pin))}.</p>`;

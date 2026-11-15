@@ -26,7 +26,8 @@ AGENCIES = {  # portal id -> city (South Euclid and Shaker Heights stopped posti
     73: "SHAKER HEIGHTS",
 }
 POLICE = os.path.join(store.DATA, "police.jsonl")
-UA = "Deedwatch/1.0 (personal neighborhood map; github.com/Nikles19/deedwatch)"
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+      "Chrome/130.0 Safari/537.36 Deedwatch/1.0 (+github.com/Nikles19/deedwatch)")
 KEEP_DAYS = 400
 
 
@@ -51,13 +52,65 @@ def save(reports: dict[str, dict]):
     os.replace(tmp, POLICE)
 
 
+class Blocked(RuntimeError):
+    pass
+
+
 class Portal:
+    """Talks to the portal with requests; if the server resets Python's connections, falls back to curl."""
+
     def __init__(self, min_interval=0.6):
         self.s = requests.Session()
-        self.s.headers["User-Agent"] = UA
+        self.s.headers.update({"User-Agent": UA, "Accept": "text/html,application/pdf,*/*;q=0.8",
+                               "Accept-Language": "en-US,en;q=0.9"})
         self.min_interval, self._last, self.requests = min_interval, 0.0, 0
+        self.use_curl, self.fails = False, 0
+
+    def _curl(self, method, url, data=None):
+        import subprocess
+        cmd = ["curl", "-sS", "--max-time", "60", "-A", UA, "-o", "-", "-w", "\n%{http_code}", url]
+        if method == "POST":
+            for k, v in (data or {}).items():
+                cmd += ["--data-urlencode", f"{k}={v}"]
+        out = subprocess.run(cmd, capture_output=True, timeout=90)
+        if out.returncode:
+            raise RuntimeError(f"curl exit {out.returncode}: {out.stderr.decode()[:200]}")
+        body, _, code = out.stdout.rpartition(b"\n")
+        if code != b"200":
+            raise RuntimeError(f"curl HTTP {code.decode()} {url}")
+        r = requests.models.Response()
+        r.status_code, r._content, r.encoding = 200, body, "utf-8"
+        return r
 
     def _req(self, method, url, **kw):
+        if self.fails >= 3:
+            raise Blocked("portal keeps refusing connections from this server")
+        err = None
+        for attempt in range(3):
+            wait = self._last + self.min_interval - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            self._last = time.monotonic()
+            try:
+                r = self._curl(method, url, kw.get("data")) if self.use_curl else self.s.request(method, url, timeout=45, **kw)
+                self.requests += 1
+                if r.status_code == 200:
+                    self.fails = 0
+                    return r
+                err = RuntimeError(f"HTTP {r.status_code} {url}")
+            except requests.ConnectionError as e:
+                err = e
+                if not self.use_curl:  # Python's connection was reset: try curl from here on
+                    self.use_curl = True
+                    print("police: switching to curl after", type(e).__name__, flush=True)
+                    continue
+            except Exception as e:  # noqa: BLE001
+                err = e
+            time.sleep(2 * (attempt + 1))
+        self.fails += 1
+        raise err
+
+    def _old_req(self, method, url, **kw):
         err = None
         for attempt in range(4):
             wait = self._last + self.min_interval - time.monotonic()
@@ -184,7 +237,7 @@ def run(minutes: float = 30, days: int = 10, backfill_days: int = KEEP_DAYS, int
     for ag, city in AGENCIES.items():
         done_back = pst.get(f"back_{ag}")
         span = days if done_back else backfill_days
-        start = 0 if done_back else pst.get(f"back_pos_{ag}", 0)
+        start = 0 if (done_back or not reports) else pst.get(f"back_pos_{ag}", 0)
         for i in range(start, span):
             if time.monotonic() > deadline:
                 if not done_back:
@@ -193,9 +246,15 @@ def run(minutes: float = 30, days: int = 10, backfill_days: int = KEEP_DAYS, int
             day = today - timedelta(days=i)
             try:
                 rows = portal.by_date(ag, day)
+            except Blocked:
+                if not done_back:
+                    pst[f"back_pos_{ag}"] = i
+                break
             except Exception as e:  # noqa: BLE001
                 print("police list failed", ag, day.date(), e, flush=True)
-                continue
+                if not done_back:  # retry this day next run rather than skipping it
+                    pst[f"back_pos_{ag}"] = i
+                break
             for r in rows:
                 rid = f"{ag}-{r['n']}"
                 if rid in reports:
@@ -214,7 +273,7 @@ def run(minutes: float = 30, days: int = 10, backfill_days: int = KEEP_DAYS, int
                   key=lambda r: r["d"], reverse=True)
     parsed = failed = 0
     for r in todo:
-        if time.monotonic() > deadline:
+        if time.monotonic() > deadline or portal.fails >= 3:
             break
         try:
             r["off"] = parse_offenses(pdf_text(portal.pdf(r["pdf"])))
@@ -228,6 +287,8 @@ def run(minutes: float = 30, days: int = 10, backfill_days: int = KEEP_DAYS, int
             print("police pdf failed", r["id"], e, flush=True)
     save(reports)
     pending = sum(1 for r in reports.values() if not r.get("ok") and r["d"] >= cutoff)
+    pst["error"] = "portal refused connections" if (portal.fails >= 3 and not added and not parsed) else None
+    pst["via"] = "curl" if portal.use_curl else "requests"
     pst.update({"at": store.now_iso(), "added": added, "parsed": parsed, "failed": failed, "pending": pending,
                 "total": len(reports), "located": sum(1 for r in reports.values() if r.get("lat"))})
     store.save_state(st)

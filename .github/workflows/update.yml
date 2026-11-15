@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "nightly | backfill | build"
+        description: "nightly | backfill | build | police (quick police-only test)"
         default: nightly
   push:
     branches: [main]
@@ -58,10 +58,10 @@ jobs:
       - name: Police reports
         if: steps.mode.outputs.mode != 'build'
         continue-on-error: true
-        run: python -m scraper police --minutes ${{ steps.mode.outputs.mode == 'nightly' && 25 || 20 }}
+        run: python -m scraper police --minutes ${{ steps.mode.outputs.mode == 'police' && 4 || (steps.mode.outputs.mode == 'nightly' && 25 || 20) }}
 
       - name: Sale histories
-        if: steps.mode.outputs.mode != 'build'
+        if: steps.mode.outputs.mode != 'build' && steps.mode.outputs.mode != 'police'
         run: |
           if [ ! -s data/parcels.jsonl ]; then python -m scraper base; fi
           python -m scraper history --minutes ${{ steps.mode.outputs.mode == 'nightly' && 120 || 150 }}
@@ -78,14 +78,14 @@ jobs:
           for i in 1 2 3; do git pull --rebase -X ours origin main && git push && break; sleep 5; done
 
       - name: Keep backfilling until every parcel has history
-        if: steps.mode.outputs.mode != 'build'
+        if: steps.mode.outputs.mode != 'build' && steps.mode.outputs.mode != 'police'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           rem=$(python -c "
           import json; s=json.load(open('data/state.json')); p=s.get('police',{})
           from scraper.police import AGENCIES
-          todo = s.get('history',{}).get('remaining',0) + p.get('pending',0) + sum(1 for a in AGENCIES if not p.get(f'back_{a}'))
+          todo = s.get('history',{}).get('remaining',0) + (0 if p.get('error') else p.get('pending',0) + sum(1 for a in AGENCIES if a in (52, 38, 44) and not p.get(f'back_{a}')))
           print(todo)")
           echo "Work still to do (parcels without history + police backlog): $rem"
           if [ "$rem" -gt 0 ]; then gh workflow run update.yml --ref main -f mode=backfill; fi

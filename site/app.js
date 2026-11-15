@@ -441,3 +441,17 @@ async function boot() {
   renderAll(true); renderFoot();
 }
 boot();
+
+/* ---------------- installable app ---------------- */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; $("#installBtn").hidden = false; });
+$("#installBtn").onclick = async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  try { await installPrompt.userChoice; } catch {}
+  installPrompt = null; $("#installBtn").hidden = true;
+};
+window.addEventListener("appinstalled", () => { $("#installBtn").hidden = true; });

@@ -7,9 +7,13 @@
   "remaining": 0
  },
  "police": {
-  "added": 766,
-  "at": "2026-11-15T12:54:33-05:00",
+  "added": 7713,
+  "at": "2026-11-15T13:16:35-05:00",
+  "back_38": "2026-11-15",
+  "back_44": "2026-11-15",
   "back_52": "2026-11-15",
+  "back_69": "2026-11-15",
+  "back_73": "2026-11-15",
   "back_pos_38": 0,
   "back_pos_44": 0,
   "back_pos_52": 28,
@@ -17,10 +21,10 @@
   "back_pos_73": 0,
   "error": null,
   "failed": 0,
-  "located": 733,
-  "parsed": 0,
-  "pending": 569,
-  "total": 766,
+  "located": 7767,
+  "parsed": 388,
+  "pending": 6808,
+  "total": 8479,
   "via": "curl"
  },
  "sweep": {

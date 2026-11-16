@@ -183,7 +183,7 @@
 {"ag":38,"c":"BEACHWOOD","d":"2025-10-22","id":"38-25046324","lat":null,"lng":null,"loc":"LOCAL LANES,32.4","n":"25046324","off":["Traffic crash"],"ok":1,"pdf":"pdfs/38/25046324.PDF","t":"Accident"}
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2025-10-22","id":"44-2504010","lat":41.504638,"lng":-81.59683,"loc":"2300,OVERLOOK RD","n":"2504010","off":["ATTEMPTED VEHICLE THEFT"],"ok":1,"pdf":"pdfs/44/I2504010.PDF","t":"Incident"}
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2025-10-22","id":"44-2504011","lat":41.502916,"lng":-81.565856,"loc":"2080,LEE RD","n":"2504011","off":["CIVIL MATTER"],"ok":1,"pdf":"pdfs/44/I2504011.PDF","t":"Incident"}
-{"ag":44,"c":"CLEVELAND HEIGHTS","d":"2025-10-22","id":"44-2504012","lat":41.529849,"lng":-81.548701,"loc":"3665,MONTICELLO BLVD","n":"2504012","off":[],"ok":0,"pdf":"pdfs/44/I2504012.PDF","t":"Incident","tries":1}
+{"ag":44,"c":"CLEVELAND HEIGHTS","d":"2025-10-22","id":"44-2504012","lat":41.529849,"lng":-81.548701,"loc":"3665,MONTICELLO BLVD","n":"2504012","off":[],"ok":0,"pdf":"pdfs/44/I2504012.PDF","t":"Incident","tries":2}
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2025-10-22","id":"44-2504013","lat":41.524534,"lng":-81.535695,"loc":"1328,BROOKLINE RD","n":"2504013","off":["CIVIL MATTER"],"ok":1,"pdf":"pdfs/44/I2504013.PDF","t":"Incident"}
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2025-10-22","id":"44-2504014","lat":41.529869,"lng":-81.551265,"loc":"MONTICELLO BLVD,QUILLIAMS RD","n":"2504014","off":["Traffic crash"],"ok":1,"pdf":"pdfs/44/2504014.PDF","t":"Accident"}
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2025-10-22","id":"44-2504016","lat":41.512657,"lng":-81.558779,"loc":"1732,COMPTON RD","n":"2504016","off":["SUSPICION"],"ok":1,"pdf":"pdfs/44/I2504016.PDF","t":"Incident"}

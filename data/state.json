@@ -7,8 +7,8 @@
   "remaining": 0
  },
  "police": {
-  "added": 0,
-  "at": "2026-11-15T14:22:05-05:00",
+  "added": 2,
+  "at": "2026-11-15T20:34:33-05:00",
   "back_38": "2026-11-15",
   "back_44": "2026-11-15",
   "back_52": "2026-11-15",
@@ -19,12 +19,12 @@
   "back_pos_52": 28,
   "back_pos_69": 0,
   "back_pos_73": 0,
-  "error": "portal refused connections",
-  "failed": 3,
-  "located": 7767,
-  "parsed": 0,
-  "pending": 1091,
-  "total": 8479,
+  "error": null,
+  "failed": 6,
+  "located": 7769,
+  "parsed": 1085,
+  "pending": 4,
+  "total": 8481,
   "via": "curl"
  },
  "sweep": {

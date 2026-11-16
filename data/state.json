@@ -1,14 +1,14 @@
 {
  "base": "2026-11-15T08:57:21-05:00",
  "history": {
-  "at": "2026-11-15T12:23:20-05:00",
+  "at": "2026-11-16T13:53:43-05:00",
   "failed": 0,
-  "fetched": 2201,
+  "fetched": 19,
   "remaining": 0
  },
  "police": {
-  "added": 0,
-  "at": "2026-11-16T07:04:15-05:00",
+  "added": 16,
+  "at": "2026-11-16T13:53:32-05:00",
   "back_38": "2026-11-15",
   "back_44": "2026-11-15",
   "back_52": "2026-11-15",
@@ -20,16 +20,16 @@
   "back_pos_69": 0,
   "back_pos_73": 0,
   "error": null,
-  "failed": 1,
-  "located": 7774,
-  "parsed": 0,
+  "failed": 0,
+  "located": 7789,
+  "parsed": 15,
   "pending": 0,
-  "total": 8487,
+  "total": 8503,
   "via": "curl"
  },
  "sweep": {
-  "at": "2026-11-14T22:45:58-05:00",
-  "changes": 0,
+  "at": "2026-11-16T13:52:52-05:00",
+  "changes": 19,
   "failures": 0,
   "requests": 1223,
   "seen": 50338

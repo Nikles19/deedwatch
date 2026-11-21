@@ -8602,4 +8602,5 @@
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2026-11-20","id":"44-2604884","lat":41.511221,"lng":-81.555385,"loc":"1594,S TAYLOR RD","n":"2604884","off":["AUTOS TOWED","TRAFFIC STOP (FREE TEXT)"],"ok":1,"pdf":"pdfs/44/I2604884.PDF","t":"Incident"}
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2026-11-20","id":"44-2604885","lat":41.507351,"lng":-81.586551,"loc":"2625,EUCLID HEIGHTS BLVD","n":"2604885","off":["PARKING/ BLOCKED DRIVEWAY"],"ok":1,"pdf":"pdfs/44/I2604885.PDF","t":"Incident"}
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2026-11-20","id":"44-2604887","lat":41.498151,"lng":-81.566217,"loc":"3165,KENSINGTON RD","n":"2604887","off":["CIVIL MATTER"],"ok":1,"pdf":"pdfs/44/I2604887.PDF","t":"Incident"}
+{"ag":44,"c":"CLEVELAND HEIGHTS","d":"2026-11-20","id":"44-2604888","lat":41.5176155,"lng":-81.565693,"loc":"MAYFIELD,NEWBURY","n":"2604888","off":["Traffic crash"],"ok":1,"pdf":"pdfs/44/2604888.PDF","t":"Accident"}
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2026-11-20","id":"44-2604889","lat":41.506735500000005,"lng":-81.566914,"loc":"N PARK BLVD,LEE RD","n":"2604889","off":["MOTOR VEHICLE ACCIDENT- SELF-REPORTED"],"ok":1,"pdf":"pdfs/44/I2604889.PDF","t":"Incident"}

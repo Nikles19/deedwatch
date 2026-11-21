@@ -7,8 +7,8 @@
   "remaining": 0
  },
  "police": {
-  "added": 6,
-  "at": "2026-11-21T06:43:23-05:00",
+  "added": 1,
+  "at": "2026-11-21T11:27:17-05:00",
   "back_38": "2026-11-15",
   "back_44": "2026-11-15",
   "back_52": "2026-11-15",
@@ -21,15 +21,15 @@
   "back_pos_73": 0,
   "error": null,
   "failed": 0,
-  "located": 7877,
-  "parsed": 4,
+  "located": 7878,
+  "parsed": 1,
   "pending": 0,
-  "total": 8604,
+  "total": 8605,
   "via": "curl"
  },
  "sweep": {
-  "at": "2026-11-20T12:14:30-05:00",
-  "changes": 19,
+  "at": "2026-11-21T11:26:46-05:00",
+  "changes": 0,
   "failures": 0,
   "requests": 1223,
   "seen": 50338

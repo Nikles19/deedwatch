@@ -81,12 +81,12 @@ function setFull(on) {
 let parcelLayer, labelLayer, parcelTimer, parcelAbort, parcelRenderer;
 async function countyParcels(b, signal) {
   const feats = [];
-  for (const layer of [1, 0]) {
+  for (const layer of [0]) {
     for (let offset = 0; offset < 6000; offset += 2000) {
       const q = new URLSearchParams({geometry: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(","), geometryType: "esriGeometryEnvelope",
-        inSR: 4326, spatialRel: "esriSpatialRelIntersects", outFields: "parcelpin,par_addr_all,par_city,deeded_owner", returnGeometry: true,
+        inSR: 4326, spatialRel: "esriSpatialRelIntersects", outFields: "parcelpin,par_addr_all,parcel_city,parcel_owner", returnGeometry: true,
         outSR: 4326, geometryPrecision: 6, f: "geojson", resultOffset: offset, resultRecordCount: 2000});
-      const r = await fetch(`${COUNTY}Open_Data_Parcels/MapServer/${layer}/query?${q}`, {signal});
+      const r = await fetch(`${COUNTY}CCFO/Parcel_Fabric_Taxparcels/FeatureServer/${layer}/query?${q}`, {signal});
       const j = await r.json();
       const fs = j.features || [];
       feats.push(...fs);
@@ -99,7 +99,7 @@ function parcelInfo(f) {
   const p = f.properties || {}, pin = String(p.parcelpin || "").trim();
   const ix = S.indexMap && S.indexMap.get(pin);
   const addr = (ix && ix[1]) || String(p.par_addr_all || "").split(",")[0].replace(/\s+/g, " ").trim();
-  return {pin, addr, owner: (ix && ix[3]) || p.deeded_owner || "", city: (ix && ix[2]) || p.par_city || ""};
+  return {pin, addr, owner: (ix && ix[3]) || p.parcel_owner || "", city: (ix && ix[2]) || p.parcel_city || ""};
 }
 async function loadParcels() {
   const z = map.getZoom();

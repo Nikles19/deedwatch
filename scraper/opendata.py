@@ -1,7 +1,7 @@
-"""Base parcel layer from the county's ArcGIS Open Data Parcels service.
+"""Base parcel layer from the county Fiscal Office's Parcel Fabric Taxparcels service.
 
-Ownership here lags months behind, so it is used only for what changes slowly:
-map location, land use, class, certified value, building size, street list.
+Used for what changes slowly: map location, land use, class, certified value,
+building size, mailing address and the street list for the nightly MyPlace sweep.
 """
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ import time
 
 import requests
 
-URL = "https://gis.cuyahogacounty.gov/server/rest/services/Open_Data_Parcels/MapServer/1/query"
-FIELDS = ["parcelpin", "par_addr", "par_street", "par_suffix", "par_unit", "par_city", "par_zip", "property_class",
-          "tax_luc_description", "gross_certified_total", "total_res_liv_area", "total_acreage", "deeded_owner",
-          "res_bldg_count", "com_living_units", "mail_name", "mail_addr_street", "mail_unit", "mail_city", "mail_state",
-          "mail_zip"]
+URL = "https://gis.cuyahogacounty.gov/server/rest/services/CCFO/Parcel_Fabric_Taxparcels/FeatureServer/0/query"
+FIELDS = ["parcelpin", "parcel_addr", "parcel_predir", "parcel_street", "parcel_suffix", "parcel_unit", "parcel_city",
+          "property_class", "tax_luc_description", "gross_certified_total", "total_res_liv_area", "parcel_acreage",
+          "parcel_owner", "res_bldg_count", "com_living_units", "mail_name", "mail_addr_street", "mail_unit_no",
+          "mail_city", "mail_state", "mail_zip"]
 
 
 def _get(params, retries=4):
@@ -47,35 +47,38 @@ def centroid(geom):
     return round((min(ys) + max(ys)) / 2, 6), round((min(xs) + max(xs)) / 2, 6)
 
 
+def _s(a, k):
+    return " ".join(str(a.get(k) or "").split())
+
+
 def fetch_city(city: str) -> list[dict]:
     rows, offset = [], 0
     while True:
-        j = _get({"where": f"par_city = '{city}'", "outFields": ",".join(FIELDS), "returnGeometry": "true",
+        j = _get({"where": f"parcel_city = '{city}'", "outFields": ",".join(FIELDS), "returnGeometry": "true",
                   "outSR": 4326, "geometryPrecision": 6, "maxAllowableOffset": 0.00005,
-                  "orderByFields": "OBJECTID", "resultOffset": offset, "resultRecordCount": 2000})
+                  "orderByFields": "ObjectID", "resultOffset": offset, "resultRecordCount": 2000})
         feats = j.get("features", [])
         for f in feats:
             a = f["attributes"]
             c = centroid(f.get("geometry"))
-            num = (a.get("par_addr") or "").strip()
-            street = " ".join(x for x in [(a.get("par_street") or "").strip(), (a.get("par_suffix") or "").strip()] if x)
-            unit = (a.get("par_unit") or "").strip()
+            street = " ".join(x for x in [_s(a, "parcel_predir"), _s(a, "parcel_street"), _s(a, "parcel_suffix")] if x)
+            unit = _s(a, "parcel_unit")
             rows.append({
-                "pin": (a.get("parcelpin") or "").strip(),
-                "a": " ".join(x for x in [num, street] if x) + (f" #{unit}" if unit else ""),
-                "st": (a.get("par_street") or "").strip(),
+                "pin": _s(a, "parcelpin"),
+                "a": " ".join(x for x in [_s(a, "parcel_addr"), street] if x) + (f" #{unit}" if unit else ""),
+                "st": _s(a, "parcel_street"),
                 "c": city,
-                "cls": (a.get("property_class") or "").strip()[:1],
-                "luc": (a.get("tax_luc_description") or "").strip(),
+                "cls": _s(a, "property_class")[:1],
+                "luc": _s(a, "tax_luc_description"),
                 "v": a.get("gross_certified_total") or 0,
                 "sf": a.get("total_res_liv_area") or 0,
-                "ac": a.get("total_acreage") or 0,
+                "ac": a.get("parcel_acreage") or 0,
                 "u": a.get("com_living_units") or 0,
-                "o0": (a.get("deeded_owner") or "").strip(),
-                "mn": " ".join((a.get("mail_name") or "").split()),
-                "ma": " ".join(" ".join(x for x in [(a.get("mail_addr_street") or "").strip(), (a.get("mail_unit") or "").strip()] if x).split()),
-                "mc": " ".join(x for x in [(a.get("mail_city") or "").strip() + ",", (a.get("mail_state") or "").strip(),
-                                          (a.get("mail_zip") or "").strip()[:5]] if x.strip(",")).strip(" ,"),
+                "o0": _s(a, "parcel_owner"),
+                "mn": _s(a, "mail_name"),
+                "ma": " ".join(x for x in [_s(a, "mail_addr_street"), _s(a, "mail_unit_no")] if x),
+                "mc": " ".join(x for x in [_s(a, "mail_city") + ",", _s(a, "mail_state"), _s(a, "mail_zip")[:5]]
+                               if x.strip(",")).strip(" ,"),
                 "lat": c[0] if c else None,
                 "lng": c[1] if c else None,
             })

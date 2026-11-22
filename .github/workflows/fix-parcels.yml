@@ -1,0 +1,220 @@
+# One-time fix: move Deedwatch from the retired Open_Data_Parcels service to the
+# county's new CCFO/Parcel_Fabric_Taxparcels layer.
+#
+# What it does when you commit this file:
+#   1. Checks the new county layer is up and has the fields the app needs.
+#   2. Makes the four map edits in site/app.js and replaces scraper/opendata.py.
+#   3. Test-runs the new weekly refresh for University Heights.
+#   4. Commits the two files and redeploys the site.
+# If any check fails, nothing is committed and the run shows why.
+# Safe to re-run: edits already made are skipped. Delete this file once it succeeds.
+
+name: One-time fix - new county parcel layer
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/fix-parcels.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      - name: Check the new layer and patch the map (site/app.js)
+        run: |
+          python - <<'EOF'
+          import json, sys, urllib.parse, urllib.request
+
+          BASE = "https://gis.cuyahogacounty.gov/server/rest/services/CCFO/Parcel_Fabric_Taxparcels/FeatureServer/0"
+
+          def get(url):
+              with urllib.request.urlopen(url, timeout=90) as r:
+                  return json.load(r)
+
+          # 1) The layer answers and has the fields the map needs
+          meta = get(BASE + "?f=json")
+          names = {f["name"] for f in meta.get("fields", [])}
+          if not names:
+              sys.exit("Couldn't read the new county layer: " + json.dumps(meta)[:400])
+          missing = [f for f in ("parcelpin", "parcel_city", "parcel_owner") if f not in names]
+          if missing:
+              sys.exit("New county layer is missing: " + ", ".join(missing) + "\nFields: " + ", ".join(sorted(names)))
+          addr = next((f for f in ("par_addr_all", "parcel_addr_all") if f in names), None)
+          if not addr:
+              sys.exit("No full-address field on the new layer.\nFields: " + ", ".join(sorted(names)))
+          print("Address field:", addr)
+
+          # 2) The exact request the map will make works
+          q = urllib.parse.urlencode({"where": "1=1", "outFields": f"parcelpin,{addr},parcel_city,parcel_owner",
+                                      "resultRecordCount": 1, "returnGeometry": "false", "f": "json"})
+          test = get(BASE + "/query?" + q)
+          if "error" in test or not test.get("features"):
+              sys.exit("Map query failed on the new layer: " + json.dumps(test)[:400])
+          print("Sample parcel:", test["features"][0]["attributes"])
+
+          # 3) Patch site/app.js
+          path = "site/app.js"
+          s = open(path, encoding="utf-8").read()
+          edits = [
+              ("for (const layer of [1, 0]) {",
+               "for (const layer of [0]) {"),
+              ('"parcelpin,par_addr_all,par_city,deeded_owner"',
+               '"parcelpin,' + addr + ',parcel_city,parcel_owner"'),
+              ("`${COUNTY}Open_Data_Parcels/MapServer/${layer}/query?${q}`",
+               "`${COUNTY}CCFO/Parcel_Fabric_Taxparcels/FeatureServer/${layer}/query?${q}`"),
+              ('p.deeded_owner || "", city: (ix && ix[2]) || p.par_city',
+               'p.parcel_owner || "", city: (ix && ix[2]) || p.parcel_city'),
+          ]
+          for i, (old, new) in enumerate(edits, 1):
+              n = s.count(old)
+              if n == 1:
+                  s = s.replace(old, new)
+                  print(f"Edit {i}: done")
+              elif new in s:
+                  print(f"Edit {i}: already done")
+              else:
+                  sys.exit(f"Edit {i}: couldn't find the text to change ({n} matches):\n  {old}\n"
+                           "app.js has changed since this fix was written. Nothing was committed.")
+          if addr != "par_addr_all":
+              s = s.replace("par_addr_all", addr)
+          for leftover in ("deeded_owner", "par_city", "Open_Data_Parcels"):
+              if leftover in s:
+                  print(f"::warning::app.js still mentions {leftover}; check that spot if something looks off.")
+          if "outSR" not in s:
+              print("::warning::app.js doesn't set outSR on parcel queries; outlines may land in the wrong place.")
+          open(path, "w", encoding="utf-8").write(s)
+          EOF
+
+      - name: Replace the weekly refresh (scraper/opendata.py)
+        run: |
+          cat > scraper/opendata.py <<'PYEOF'
+          """Base parcel layer from the county Fiscal Office's Parcel Fabric Taxparcels service.
+
+          Used for what changes slowly: map location, land use, class, certified value,
+          building size, mailing address and the street list for the nightly MyPlace sweep.
+          """
+          from __future__ import annotations
+
+          import time
+
+          import requests
+
+          URL = "https://gis.cuyahogacounty.gov/server/rest/services/CCFO/Parcel_Fabric_Taxparcels/FeatureServer/0/query"
+          FIELDS = ["parcelpin", "parcel_addr", "parcel_predir", "parcel_street", "parcel_suffix", "parcel_unit", "parcel_city",
+                    "property_class", "tax_luc_description", "gross_certified_total", "total_res_liv_area", "parcel_acreage",
+                    "parcel_owner", "res_bldg_count", "com_living_units", "mail_name", "mail_addr_street", "mail_unit_no",
+                    "mail_city", "mail_state", "mail_zip"]
+
+
+          def _get(params, retries=4):
+              err = None
+              for i in range(retries):
+                  try:
+                      r = requests.post(URL, data={**params, "f": "json"}, timeout=120,
+                                        headers={"User-Agent": "Deedwatch/1.0"})
+                      j = r.json()
+                      if "error" in j:
+                          raise RuntimeError(j["error"])
+                      return j
+                  except Exception as e:  # noqa: BLE001
+                      err = e
+                      time.sleep(5 * (i + 1))
+              raise err
+
+
+          def centroid(geom):
+              if not geom:
+                  return None
+              if "x" in geom:
+                  return round(geom["y"], 6), round(geom["x"], 6)
+              xs, ys = [], []
+              for ring in geom.get("rings", []):
+                  for x, y in ring:
+                      xs.append(x)
+                      ys.append(y)
+              if not xs:
+                  return None
+              return round((min(ys) + max(ys)) / 2, 6), round((min(xs) + max(xs)) / 2, 6)
+
+
+          def _s(a, k):
+              return " ".join(str(a.get(k) or "").split())
+
+
+          def fetch_city(city: str) -> list[dict]:
+              rows, offset = [], 0
+              while True:
+                  j = _get({"where": f"parcel_city = '{city}'", "outFields": ",".join(FIELDS), "returnGeometry": "true",
+                            "outSR": 4326, "geometryPrecision": 6, "maxAllowableOffset": 0.00005,
+                            "orderByFields": "ObjectID", "resultOffset": offset, "resultRecordCount": 2000})
+                  feats = j.get("features", [])
+                  for f in feats:
+                      a = f["attributes"]
+                      c = centroid(f.get("geometry"))
+                      street = " ".join(x for x in [_s(a, "parcel_predir"), _s(a, "parcel_street"), _s(a, "parcel_suffix")] if x)
+                      unit = _s(a, "parcel_unit")
+                      rows.append({
+                          "pin": _s(a, "parcelpin"),
+                          "a": " ".join(x for x in [_s(a, "parcel_addr"), street] if x) + (f" #{unit}" if unit else ""),
+                          "st": _s(a, "parcel_street"),
+                          "c": city,
+                          "cls": _s(a, "property_class")[:1],
+                          "luc": _s(a, "tax_luc_description"),
+                          "v": a.get("gross_certified_total") or 0,
+                          "sf": a.get("total_res_liv_area") or 0,
+                          "ac": a.get("parcel_acreage") or 0,
+                          "u": a.get("com_living_units") or 0,
+                          "o0": _s(a, "parcel_owner"),
+                          "mn": _s(a, "mail_name"),
+                          "ma": " ".join(x for x in [_s(a, "mail_addr_street"), _s(a, "mail_unit_no")] if x),
+                          "mc": " ".join(x for x in [_s(a, "mail_city") + ",", _s(a, "mail_state"), _s(a, "mail_zip")[:5]]
+                                         if x.strip(",")).strip(" ,"),
+                          "lat": c[0] if c else None,
+                          "lng": c[1] if c else None,
+                      })
+                  if not (j.get("exceededTransferLimit") or len(feats) == 2000) or not feats:
+                      break
+                  offset += len(feats)
+              return [r for r in rows if r["pin"]]
+          PYEOF
+
+      - name: Test the new refresh on University Heights
+        run: |
+          python - <<'EOF'
+          import sys
+          from scraper import opendata
+          rows = opendata.fetch_city("UNIVERSITY HEIGHTS")
+          with_addr = sum(1 for r in rows if r["a"])
+          with_loc = sum(1 for r in rows if r["lat"])
+          print(f"{len(rows)} parcels, {with_addr} with addresses, {with_loc} with map locations")
+          print("Sample:", rows[0] if rows else None)
+          if len(rows) < 1000 or with_addr < 0.9 * len(rows) or with_loc < 0.9 * len(rows):
+              sys.exit("The new refresh returned too little University Heights data. Nothing was committed.")
+          EOF
+
+      - name: Commit and redeploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_AUTHOR_NAME: deedwatch-bot
+          GIT_COMMITTER_NAME: deedwatch-bot
+          EMAIL: deedwatch-bot
+        run: |
+          git add site/app.js scraper/opendata.py
+          if git diff --cached --quiet; then
+            echo "Already patched, nothing to commit."
+          else
+            git commit -m "Switch parcels to the county's new Parcel_Fabric_Taxparcels layer"
+            git push
+          fi
+          gh workflow run update.yml -f mode=build

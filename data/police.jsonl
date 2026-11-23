@@ -8551,6 +8551,7 @@
 {"ag":38,"c":"BEACHWOOD","d":"2026-11-16","id":"38-26051964","lat":41.485257,"lng":-81.498408,"loc":"2700,RICHMOND RD","n":"26051964","off":["HARASSMENT GENERAL"],"ok":1,"pdf":"pdfs/38/I26051964.PDF","t":"Incident"}
 {"ag":38,"c":"BEACHWOOD","d":"2026-11-16","id":"38-26052005","lat":41.49773,"lng":-81.490151,"loc":"CEDAR RD,","n":"26052005","off":["Traffic crash"],"ok":1,"pdf":"pdfs/38/26052005.PDF","t":"Accident"}
 {"ag":38,"c":"BEACHWOOD","d":"2026-11-16","id":"38-26052008","lat":41.45941,"lng":-81.515983,"loc":"GREEN,3681","n":"26052008","off":["Traffic crash"],"ok":1,"pdf":"pdfs/38/26052008.PDF","t":"Accident"}
+{"ag":38,"c":"BEACHWOOD","d":"2026-11-16","id":"38-26052018","lat":41.497673,"lng":-81.503058,"loc":",HILLTOP","n":"26052018","off":["Traffic crash"],"ok":1,"pdf":"pdfs/38/26052018.PDF","t":"Accident"}
 {"ag":38,"c":"BEACHWOOD","d":"2026-11-16","id":"38-26052021","lat":null,"lng":null,"loc":",GEORGE ZEIGER","n":"26052021","off":["Traffic crash"],"ok":1,"pdf":"pdfs/38/26052021.PDF","t":"Accident"}
 {"ag":38,"c":"BEACHWOOD","d":"2026-11-16","id":"38-26052050","lat":null,"lng":null,"loc":"3995,GREEN RD","n":"26052050","off":["PSYCHIATRIC SITUATION"],"ok":1,"pdf":"pdfs/38/I26052050.PDF","t":"Incident"}
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2026-11-16","id":"44-2604824","lat":null,"lng":null,"loc":"3155,E DERBYSHIRE RD","n":"2604824","off":["DISTURBANCE"],"ok":1,"pdf":"pdfs/44/I2604824.PDF","t":"Incident"}
@@ -8607,3 +8608,4 @@
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2026-11-20","id":"44-2604889","lat":41.506735500000005,"lng":-81.566914,"loc":"N PARK BLVD,LEE RD","n":"2604889","off":["MOTOR VEHICLE ACCIDENT- SELF-REPORTED"],"ok":1,"pdf":"pdfs/44/I2604889.PDF","t":"Incident"}
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2026-11-20","id":"44-2604893","lat":41.50199,"lng":-81.593396,"loc":"2116,SURREY RD","n":"2604893","off":["AUTOS TOWED","PARKING VIOLATION"],"ok":1,"pdf":"pdfs/44/I2604893.PDF","t":"Incident"}
 {"ag":44,"c":"CLEVELAND HEIGHTS","d":"2026-11-20","id":"44-2604894","lat":41.524851,"lng":-81.5625175,"loc":"RUTHERFORD RD,MONTICELLO BLVD","n":"2604894","off":["OPEN CONTAINER LAW","POSSESSION OF DRUGS","ARREST THROUGH TELECOMMUNICATIONS","TRAFFIC STOP (FREE TEXT)"],"ok":1,"pdf":"pdfs/44/I2604894.PDF","t":"Incident"}
+{"ag":44,"c":"CLEVELAND HEIGHTS","d":"2026-11-22","id":"44-2604913","lat":null,"lng":null,"loc":"3557,RADCLIFF RD","n":"2604913","off":["DAMAGE TO AUTO"],"ok":1,"pdf":"pdfs/44/I2604913.PDF","t":"Incident"}

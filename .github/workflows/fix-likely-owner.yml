@@ -1,0 +1,250 @@
+# One-time change: add a "Likely owner" line to the house drawer for company-owned parcels.
+#
+# For a parcel owned by an LLC / company, the nightly build looks for a person's name using:
+#   1. The tax-bill "addressed to" name, if it's a person            (strongest)
+#   2. A person who owns the house at the LLC's mailing address      (strong)
+#   3. People who get tax bills at that same mailing address         (weaker; skipped for
+#      addresses shared by many unrelated owners, like law firms and property managers)
+# It shows up to two names, each with a one-line reason. Nothing is shown when no person is found.
+#
+# What this workflow does when you commit it:
+#   1. Patches scraper/build.py and site/app.js (skips edits already made).
+#   2. Self-tests the matching logic on made-up parcels.
+#   3. Runs it on your real parcels and prints how many LLC parcels got a name.
+#   4. Test-builds the site, then commits and redeploys.
+# If any step fails, nothing is committed. Delete this file once it succeeds.
+
+name: One-time change - likely owner for LLC parcels
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/fix-likely-owner.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      - name: Patch build.py and app.js
+        run: |
+          python - <<'EOF'
+          import sys
+
+          HELPERS = r'''ENTITY = re.compile(
+              r"\b(LLC|L L C|INC|INCORPORATED|CORP|CORPORATION|COMPANY|CO|LP|LLP|LTD|LIMITED|PLC|PLLC|TRUST|TRUSTEE|"
+              r"TRUSTEES|TR|PARTNERS|PARTNERSHIP|HOLDINGS|PROPERTIES|PROPERTY|ASSOCIATION|ASSOCIATES|FOUNDATION|"
+              r"MANAGEMENT|REALTY|REAL ESTATE|CAPITAL|INVESTMENT|INVESTMENTS|INVESTORS|GROUP|LEGAL|LAW|ATTORNEY|"
+              r"ATTORNEYS|SERVICES|MORTGAGE|BANK|FUND|ENTERPRISES|VENTURES|DEVELOPMENT|APARTMENTS|RENTAL|RENTALS|"
+              r"HOMES|HOUSING|EQUITY|LENDING|SERVICING|CHURCH|SCHOOL|UNIVERSITY|HOSPITAL|FINANCIAL|SOLUTIONS|ESTATE|"
+              r"AUTHORITY|DEPT|TAX|REVOCABLE|LIVING)\b")
+          _ABBR = {"ROAD": "RD", "STREET": "ST", "AVENUE": "AVE", "BOULEVARD": "BLVD", "DRIVE": "DR", "LANE": "LN",
+                   "COURT": "CT", "CIRCLE": "CIR", "PLACE": "PL", "PARKWAY": "PKWY", "TERRACE": "TER", "TRAIL": "TRL",
+                   "HIGHWAY": "HWY", "NORTH": "N", "SOUTH": "S", "EAST": "E", "WEST": "W", "CENTER": "CTR"}
+          _UNIT = re.compile(r"\b(SUITE|STE|UNIT|APT|APARTMENT|FL|FLOOR|RM|ROOM|BLDG|BUILDING)\b.*$")
+
+
+          def _street_key(s):
+              s = _UNIT.sub("", store.norm_owner(s))
+              return " ".join(_ABBR.get(w, w) for w in s.split())
+
+
+          def _city_key(mc):
+              return store.norm_owner((mc or "").split(",")[0])
+
+
+          def _clean_mail_name(mn):
+              return re.sub(r"^\s*(C/?O|ATTN:?|ATTENTION:?)\s+", "", mn or "", flags=re.I).strip()
+
+
+          def _is_person(name):
+              n = store.norm_owner(name)
+              if not n or len(n.split()) < 2 or re.search(r"\d", n):
+                  return False
+              return not ENTITY.search(n) and not PUBLIC.search(n)
+
+
+          def compute_likely(parcels):
+              """pin -> [[name, reason], ...] for company-owned parcels where a person can be inferred."""
+              info, by_mail, by_prop = {}, defaultdict(list), defaultdict(list)
+              for pin, p in parcels.items():
+                  name = p.get("o") or p.get("o0") or ""
+                  pk = (_street_key((p.get("a") or "").split("#")[0]), store.norm_owner(p.get("c", "")))
+                  mk = (_street_key(p.get("ma") or ""), _city_key(p.get("mc"))) if p.get("ma") else None
+                  info[pin] = (name, pk, mk)
+                  by_prop[pk].append(pin)
+                  if mk:
+                      by_mail[mk].append(pin)
+              out = {}
+              for pin, (name, pk, mk) in info.items():
+                  nn = store.norm_owner(name)
+                  if not nn or not ENTITY.search(nn) or PUBLIC.search(nn):
+                      continue
+                  me = owner_key(name) or name
+                  cand = {}
+
+                  def add(nm, score, why):
+                      k = store.norm_owner(nm)
+                      if not k or (owner_key(nm) or nm) == me:
+                          return
+                      if k not in cand or score > cand[k][1]:
+                          cand[k] = [nm, score, why]
+
+                  mn = _clean_mail_name(parcels[pin].get("mn"))
+                  if _is_person(mn):
+                      add(mn, 100, "Tax bills are addressed to this person")
+                  if mk and mk[0]:
+                      here = [q for q in by_prop.get(mk, []) if q != pin and _is_person(info[q][0])]
+                      if 0 < len({store.norm_owner(info[q][0]) for q in here}) <= 3:
+                          for q in here:
+                              occ = info[q][2] == info[q][1]
+                              why = "Owns the house at the mailing address"
+                              if occ:
+                                  why += " and has their own tax bills sent there"
+                              add(info[q][0], 60 if occ else 45, why)
+                      group = [q for q in by_mail.get(mk, []) if q != pin]
+                      if group and len({owner_key(info[q][0]) or info[q][0] for q in group}) <= 6:
+                          cnt, disp = defaultdict(int), {}
+                          for q in group:
+                              for nm in (info[q][0], _clean_mail_name(parcels[q].get("mn"))):
+                                  if _is_person(nm):
+                                      k = store.norm_owner(nm)
+                                      cnt[k] += 1
+                                      disp.setdefault(k, nm)
+                          for k, c in cnt.items():
+                              plural = "s" if c != 1 else ""
+                              add(disp[k], 20 + min(c, 10), "Also receives tax bills at this address (%d parcel%s)" % (c, plural))
+                  best = sorted(cand.values(), key=lambda v: -v[1])[:2]
+                  if best:
+                      out[pin] = [[v[0], v[2]] for v in best]
+              return out
+
+
+          '''
+
+          def patch(path, edits):
+              s = open(path, encoding="utf-8").read()
+              for label, marker, old, new in edits:
+                  if marker in s:
+                      print(f"{path} - {label}: already done")
+                      continue
+                  n = s.count(old)
+                  if n != 1:
+                      sys.exit(f"{path} - {label}: couldn't find the text to change ({n} matches).\n"
+                               f"  {old!r}\nThe file has changed since this fix was written. Nothing was committed.")
+                  s = s.replace(old, new)
+                  print(f"{path} - {label}: done")
+              open(path, "w", encoding="utf-8").write(s)
+
+          patch("scraper/build.py", [
+              ("helper functions", "def compute_likely(",
+               "def build(out: str):\n",
+               HELPERS + "def build(out: str):\n"),
+              ("compute step", "likely = compute_likely(parcels)",
+               "    # ---- search / parcel index ----\n    index = []\n",
+               "    likely = compute_likely(parcels)\n\n    # ---- search / parcel index ----\n    index = []\n"),
+              ("index column", 'likely.get(pin, "")',
+               'last["p"] if last else 0, (last.get("d") or "")[:7] if last else ""])',
+               'last["p"] if last else 0, (last.get("d") or "")[:7] if last else "",\n'
+               '                      likely.get(pin, "")])'),
+          ])
+
+          patch("site/app.js", [
+              ("drawer row", '"Likely owner',
+               '["Owner", owner ? `<b>${esc(title(owner))}</b>` : ""],',
+               '["Owner", owner ? `<b>${esc(title(owner))}</b>` : ""],\n'
+               '    ["Likely owner (inferred)", (ix && ix[13] ? ix[13] : []).map(([n, why]) => `<b>${esc(title(n))}</b><br><span class="sub">${esc(why)}</span>`).join("<br>")],'),
+          ])
+          EOF
+
+      - name: Self-test the matching on made-up parcels
+        run: |
+          python - <<'EOF'
+          import sys
+          from scraper.build import compute_likely
+
+          def P(pin, a, c, o, ma="", mc="", mn=""):
+              return {"pin": pin, "a": a, "c": c, "o": o, "ma": ma, "mc": mc, "mn": mn}
+
+          parcels = {
+              # LLC whose tax bills go to a person's house
+              "1": P("1", "100 MAIN ST", "UNIVERSITY HEIGHTS", "SMITH, JOHN", "100 MAIN ST", "UNIVERSITY HEIGHTS, OH 44118"),
+              "2": P("2", "200 OAK RD", "UNIVERSITY HEIGHTS", "OAK HOLDINGS LLC", "100 MAIN STREET", "UNIVERSITY HEIGHTS, OH 44118"),
+              # LLC with a person on the "care of" line
+              "3": P("3", "300 ELM RD", "CLEVELAND HEIGHTS", "ELM PROPERTIES LLC", "9 FAR AVE", "AKRON, OH 44301", "C/O DOE, JANE"),
+              # LLC sharing a mailing address with a person who lives elsewhere
+              "5": P("5", "500 PINE DR", "SOUTH EUCLID", "PINE RENTALS LLC", "55 BIZ DR", "BEACHWOOD, OH 44122"),
+              "6": P("6", "600 ASH DR", "SOUTH EUCLID", "LEE, TOM", "55 BIZ DR", "BEACHWOOD, OH 44122"),
+              # LLC with nothing to go on
+              "7": P("7", "700 BIRCH LN", "SOUTH EUCLID", "LONELY HOLDINGS LLC", "1 NOWHERE CT", "AKRON, OH 44301"),
+          }
+          # A busy shared address (like a property manager): 8 unrelated owners
+          for i in range(8):
+              parcels["h%d" % i] = P("h%d" % i, "%d HUB RD" % (900 + i), "SHAKER HEIGHTS", "OWNER%d, PERSON%d" % (i, i), "1 MANAGER PLZ", "CLEVELAND, OH 44114")
+          parcels["9"] = P("9", "950 CEDAR RD", "SHAKER HEIGHTS", "CEDAR LLC", "1 MANAGER PLZ", "CLEVELAND, OH 44114")
+
+          out = compute_likely(parcels)
+          problems = []
+          if out.get("2", [[None]])[0][0] != "SMITH, JOHN": problems.append("house-at-mailing-address match failed: %r" % out.get("2"))
+          if out.get("3", [[None]])[0][0] != "DOE, JANE": problems.append("care-of name match failed: %r" % out.get("3"))
+          if out.get("5", [[None]])[0][0] != "LEE, TOM": problems.append("shared-address match failed: %r" % out.get("5"))
+          if "7" in out: problems.append("should have no name: %r" % out.get("7"))
+          if "9" in out: problems.append("busy address should give no name: %r" % out.get("9"))
+          if "1" in out or "6" in out: problems.append("people shouldn't get a likely owner")
+          print(out)
+          if problems:
+              sys.exit("Self-test failed:\n" + "\n".join(problems))
+          print("Self-test passed.")
+          EOF
+
+      - name: Try it on the real parcels
+        run: |
+          python - <<'EOF'
+          from scraper import store
+          from scraper.build import compute_likely, ENTITY, PUBLIC
+
+          parcels = store.load_parcels()
+          ents = [p for p in parcels.values()
+                  if ENTITY.search(store.norm_owner(p.get("o") or p.get("o0") or ""))
+                  and not PUBLIC.search(store.norm_owner(p.get("o") or p.get("o0") or ""))]
+          with_mail = sum(1 for p in ents if p.get("ma"))
+          out = compute_likely(parcels)
+          print(f"{len(parcels)} parcels, {len(ents)} owned by companies, {with_mail} of those with a mailing address on file")
+          print(f"{len(out)} company-owned parcels got a likely owner")
+          if ents and with_mail < 0.5 * len(ents):
+              print("::warning::Most company parcels have no mailing address yet. The weekly county refresh "
+                    "(Sundays) fills those in; names will appear after it runs. You can also run the 'Update data and "
+                    "site' workflow by hand with mode = nightly.")
+          for pin, v in list(out.items())[:12]:
+              p = parcels[pin]
+              print(f"  {p.get('a')}  [{p.get('o') or p.get('o0')}]  ->  {v}")
+          EOF
+
+      - name: Test-build the site
+        run: python -m scraper build --out /tmp/site_test
+
+      - name: Commit and redeploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_AUTHOR_NAME: deedwatch-bot
+          GIT_COMMITTER_NAME: deedwatch-bot
+          EMAIL: deedwatch-bot
+        run: |
+          git add scraper/build.py site/app.js
+          if git diff --cached --quiet; then
+            echo "Already patched, nothing to commit."
+          else
+            git commit -m "Show a likely (inferred) owner for company-owned parcels"
+            git push
+          fi
+          gh workflow run update.yml -f mode=build

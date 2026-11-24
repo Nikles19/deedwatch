@@ -427,7 +427,7 @@ function myplaceUrl(pin) {
 }
 /* The county Recorder's document search, filtered to this parcel only (deeds, mortgages, liens). */
 function recorderUrl(pin) {
-  return `https://cuyahoga.oh.publicsearch.us/results?department=RP&parcel=${encodeURIComponent(fmtPin(String(pin)))}&searchType=advancedSearch`;
+  return `https://cuyahoga.oh.publicsearch.us/results?department=RP&parcel=${encodeURIComponent(fmtPin(String(pin)))}&searchType=advancedSearch&sort=desc&sortBy=recordedDate`;
 }
 async function openParcel(pin, row, pan) {
   await loadIndex().catch(() => {});

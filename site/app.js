@@ -425,6 +425,10 @@ function zillowUrl(addr, city) {
 function myplaceUrl(pin) {
   return `https://myplace.cuyahogacounty.gov/${btoa(String(pin).replace(/\D/g, ""))}?city=${btoa("99")}&searchBy=${btoa("Parcel")}`;
 }
+/* The county Recorder's document search, filtered to this parcel only (deeds, mortgages, liens). */
+function recorderUrl(pin) {
+  return `https://cuyahoga.oh.publicsearch.us/results?department=RP&parcel=${encodeURIComponent(fmtPin(String(pin)))}&searchType=advancedSearch`;
+}
 async function openParcel(pin, row, pan) {
   await loadIndex().catch(() => {});
   const ix = S.indexMap && S.indexMap.get(pin);
@@ -454,7 +458,8 @@ async function openParcel(pin, row, pan) {
     ["County value", ix && ix[7] ? money(ix[7]) : ""]]) +
     `<div style="display:flex;gap:8px;flex-wrap:wrap">${lat ? `<button class="btn primary" id="dMap">Show on map</button>` : ""}${owner ? `<button class="btn" id="dOwn">Other parcels of this owner</button>` : ""}
       ${/^\d/.test(a) ? `<a class="btn" href="${esc(zillowUrl(a, city))}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">Open in Zillow</a>` : ""}
-      <a class="btn" href="${esc(myplaceUrl(pin))}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">Open in MyPlace</a></div>
+      <a class="btn" href="${esc(myplaceUrl(pin))}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">Open in MyPlace</a>
+      <a class="btn" href="${esc(recorderUrl(pin))}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">Recorded documents</a></div>
      <div class="sect">Sale &amp; transfer history</div>${histHtml}
      <p class="fine">Source: Cuyahoga County Fiscal Office (MyPlace). County data is provided “as is” and is not the official record. Parcel ${esc(fmtPin(pin))}.</p>`;
   if ($("#dMap")) $("#dMap").onclick = () => { closeDrawer(); if (document.body.classList.contains("mapfull") === false && window.innerWidth <= 900) $(".mapcol").scrollIntoView({behavior: "smooth"}); map.setView([lat, lng], Math.max(map.getZoom(), LABEL_ZOOM)); setTimeout(() => S.focusMk && S.focusMk.openTooltip(), 400); };

@@ -448,6 +448,7 @@ async function openParcel(pin, row, pan) {
         <div class="h2">To ${esc((t.ge || []).map(title).join(", ") || "—")}${t.gr && t.gr.length ? ` · from ${esc(t.gr.map(title).join(", "))}` : ""}</div></li>`; }).join("")}</ul>`;
   $("#dBody").innerHTML = kv([
     ["Owner", owner ? `<b>${esc(title(owner))}</b>` : ""],
+    ["Likely owner (inferred)", (ix && ix[13] ? ix[13] : []).map(([n, why]) => `<b>${esc(title(n))}</b><br><span class="sub">${esc(why)}</span>`).join("<br>")],
     ["Land use", ix && ix[6] ? esc(title(ix[6])) : ""],
     ["Living area", ix && ix[8] ? Math.round(ix[8]).toLocaleString() + " sq ft" : ""],
     ["County value", ix && ix[7] ? money(ix[7]) : ""]]) +

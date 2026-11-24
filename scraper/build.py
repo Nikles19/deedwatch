@@ -33,6 +33,95 @@ def _days_ago(n: int) -> str:
     return (datetime.now(store.TZ) - timedelta(days=n)).strftime("%Y-%m-%d")
 
 
+ENTITY = re.compile(
+    r"\b(LLC|L L C|INC|INCORPORATED|CORP|CORPORATION|COMPANY|CO|LP|LLP|LTD|LIMITED|PLC|PLLC|TRUST|TRUSTEE|"
+    r"TRUSTEES|TR|PARTNERS|PARTNERSHIP|HOLDINGS|PROPERTIES|PROPERTY|ASSOCIATION|ASSOCIATES|FOUNDATION|"
+    r"MANAGEMENT|REALTY|REAL ESTATE|CAPITAL|INVESTMENT|INVESTMENTS|INVESTORS|GROUP|LEGAL|LAW|ATTORNEY|"
+    r"ATTORNEYS|SERVICES|MORTGAGE|BANK|FUND|ENTERPRISES|VENTURES|DEVELOPMENT|APARTMENTS|RENTAL|RENTALS|"
+    r"HOMES|HOUSING|EQUITY|LENDING|SERVICING|CHURCH|SCHOOL|UNIVERSITY|HOSPITAL|FINANCIAL|SOLUTIONS|ESTATE|"
+    r"AUTHORITY|DEPT|TAX|REVOCABLE|LIVING)\b")
+_ABBR = {"ROAD": "RD", "STREET": "ST", "AVENUE": "AVE", "BOULEVARD": "BLVD", "DRIVE": "DR", "LANE": "LN",
+         "COURT": "CT", "CIRCLE": "CIR", "PLACE": "PL", "PARKWAY": "PKWY", "TERRACE": "TER", "TRAIL": "TRL",
+         "HIGHWAY": "HWY", "NORTH": "N", "SOUTH": "S", "EAST": "E", "WEST": "W", "CENTER": "CTR"}
+_UNIT = re.compile(r"\b(SUITE|STE|UNIT|APT|APARTMENT|FL|FLOOR|RM|ROOM|BLDG|BUILDING)\b.*$")
+
+
+def _street_key(s):
+    s = _UNIT.sub("", store.norm_owner(s))
+    return " ".join(_ABBR.get(w, w) for w in s.split())
+
+
+def _city_key(mc):
+    return store.norm_owner((mc or "").split(",")[0])
+
+
+def _clean_mail_name(mn):
+    return re.sub(r"^\s*(C/?O|ATTN:?|ATTENTION:?)\s+", "", mn or "", flags=re.I).strip()
+
+
+def _is_person(name):
+    n = store.norm_owner(name)
+    if not n or len(n.split()) < 2 or re.search(r"\d", n):
+        return False
+    return not ENTITY.search(n) and not PUBLIC.search(n)
+
+
+def compute_likely(parcels):
+    """pin -> [[name, reason], ...] for company-owned parcels where a person can be inferred."""
+    info, by_mail, by_prop = {}, defaultdict(list), defaultdict(list)
+    for pin, p in parcels.items():
+        name = p.get("o") or p.get("o0") or ""
+        pk = (_street_key((p.get("a") or "").split("#")[0]), store.norm_owner(p.get("c", "")))
+        mk = (_street_key(p.get("ma") or ""), _city_key(p.get("mc"))) if p.get("ma") else None
+        info[pin] = (name, pk, mk)
+        by_prop[pk].append(pin)
+        if mk:
+            by_mail[mk].append(pin)
+    out = {}
+    for pin, (name, pk, mk) in info.items():
+        nn = store.norm_owner(name)
+        if not nn or not ENTITY.search(nn) or PUBLIC.search(nn):
+            continue
+        me = owner_key(name) or name
+        cand = {}
+
+        def add(nm, score, why):
+            k = store.norm_owner(nm)
+            if not k or (owner_key(nm) or nm) == me:
+                return
+            if k not in cand or score > cand[k][1]:
+                cand[k] = [nm, score, why]
+
+        mn = _clean_mail_name(parcels[pin].get("mn"))
+        if _is_person(mn):
+            add(mn, 100, "Tax bills are addressed to this person")
+        if mk and mk[0]:
+            here = [q for q in by_prop.get(mk, []) if q != pin and _is_person(info[q][0])]
+            if 0 < len({store.norm_owner(info[q][0]) for q in here}) <= 3:
+                for q in here:
+                    occ = info[q][2] == info[q][1]
+                    why = "Owns the house at the mailing address"
+                    if occ:
+                        why += " and has their own tax bills sent there"
+                    add(info[q][0], 60 if occ else 45, why)
+            group = [q for q in by_mail.get(mk, []) if q != pin]
+            if group and len({owner_key(info[q][0]) or info[q][0] for q in group}) <= 6:
+                cnt, disp = defaultdict(int), {}
+                for q in group:
+                    for nm in (info[q][0], _clean_mail_name(parcels[q].get("mn"))):
+                        if _is_person(nm):
+                            k = store.norm_owner(nm)
+                            cnt[k] += 1
+                            disp.setdefault(k, nm)
+                for k, c in cnt.items():
+                    plural = "s" if c != 1 else ""
+                    add(disp[k], 20 + min(c, 10), "Also receives tax bills at this address (%d parcel%s)" % (c, plural))
+        best = sorted(cand.values(), key=lambda v: -v[1])[:2]
+        if best:
+            out[pin] = [[v[0], v[2]] for v in best]
+    return out
+
+
 def build(out: str):
     root = store.ROOT
     out = os.path.join(root, out) if not os.path.isabs(out) else out
@@ -186,6 +275,8 @@ def build(out: str):
                           "mailto": top(g["mailto"], 3), "related": [[nm, c] for nm, c in names[:12]]})
         mail_out[area] = mrows
 
+    likely = compute_likely(parcels)
+
     # ---- search / parcel index ----
     index = []
     for pin in sorted(parcels):
@@ -201,7 +292,8 @@ def build(out: str):
         last = max(sales, key=lambda t: t.get("d") or "") if sales else None
         index.append([pin, p.get("a", ""), p.get("c", ""), cur, "|".join(sorted(names)), p.get("cls", ""),
                       p.get("luc", ""), p.get("v") or 0, p.get("sf") or 0, p.get("lat"), p.get("lng"),
-                      last["p"] if last else 0, (last.get("d") or "")[:7] if last else ""])
+                      last["p"] if last else 0, (last.get("d") or "")[:7] if last else "",
+                      likely.get(pin, "")])
 
     with_hist = sum(1 for p in parcels.values() if p.get("hs"))
     meta = {

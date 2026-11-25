@@ -7,8 +7,8 @@
   "remaining": 0
  },
  "police": {
-  "added": 1,
-  "at": "2026-11-24T14:48:05-05:00",
+  "added": 6,
+  "at": "2026-11-24T19:05:09-05:00",
   "back_38": "2026-11-15",
   "back_44": "2026-11-15",
   "back_52": "2026-11-15",
@@ -21,10 +21,10 @@
   "back_pos_73": 0,
   "error": null,
   "failed": 0,
-  "located": 7910,
-  "parsed": 1,
+  "located": 7916,
+  "parsed": 6,
   "pending": 0,
-  "total": 8641,
+  "total": 8647,
   "via": "curl"
  },
  "sweep": {
